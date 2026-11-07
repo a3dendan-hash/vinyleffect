@@ -19,9 +19,9 @@ const supabaseAnonKey = rawKey || 'placeholder-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: {
-    fetch: (url, options = {}) => {
+    fetch: (url: RequestInfo | URL, options: RequestInit = {}) => {
       const tgUser = getTelegramUser();
-      const headers = new Headers(options?.headers);
+      const headers = new Headers(options.headers);
       headers.set('x-telegram-user-id', tgUser ? String(tgUser.id) : 'anonymous');
       return fetch(url, { ...options, headers });
     },
