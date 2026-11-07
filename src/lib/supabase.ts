@@ -1,23 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { getTelegramUser } from './telegram';
 
-const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+// Жестко задаем ваш URL, чтобы исключить любые ошибки чтения переменных окружения
+const rawUrl = 'https://miqxmalujcxozgoqpskv.supabase.co';
 const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
-const getCleanSupabaseUrl = (url: string): string => {
-  if (!url) return 'https://placeholder.supabase.co';
-  try {
-    return new URL(url).origin;
-  } catch {
-    const cleaned = url.replace(/\/rest\/v1\/?$/i, '',).replace(/\/+$/, '');
-    return cleaned.startsWith('http') ? cleaned : `https://${cleaned}`;
-  }
-};
-
-const supabaseUrl = getCleanSupabaseUrl(rawUrl);
-const supabaseAnonKey = rawKey || 'placeholder-key';
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(rawUrl, rawKey, {
   global: {
     fetch: (url: any, options: any = {}) => {
       const tgUser = getTelegramUser();
