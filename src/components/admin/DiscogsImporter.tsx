@@ -87,7 +87,26 @@ export const DiscogsImporter: React.FC<Props> = ({ onImportComplete }) => {
           let processed = 0;
 
           for (let i = 0; i < total; i += CHUNK_SIZE) {
-            const chunk = rows.slice(i, i + CHUNK_SIZE);
+            const rawChunk = rows.slice(i, i + CHUNK_SIZE);
+
+            // 🛡️ Защита от дубликатов в пределах чанка (убираем повторы по discogs_release_id и по названию)
+            const seenReleaseIds = new Set<string>();
+            const seenSignatures = new Set<string>();
+            const chunk = rawChunk.filter((r) => {
+              const relId = r.release_id?.trim();
+              const signature = `${r.Artist?.trim()}_${r.Title?.trim()}`;
+
+              if (relId) {
+                if (seenReleaseIds.has(relId)) return false;
+                seenReleaseIds.add(relId);
+              } else {
+                if (seenSignatures.has(signature)) return false;
+                seenSignatures.add(signature);
+              }
+              return true;
+            });
+
+            if (chunk.length === 0) continue;
 
             // Создаем пачку релизов
             const releasesPayload = chunk.map((r) => {
@@ -155,81 +174,8 @@ export const DiscogsImporter: React.FC<Props> = ({ onImportComplete }) => {
               if (itemErr) throw new Error(`Ошибка добавления в items: ${itemErr.message}`);
             }
 
-            processed += chunk.length;
+            processed += rawChunk.length;
             setProgress({ current: Math.min(processed, total), total });
           }
-
-          haptic.success();
-          setResultMsg({
-            type: 'success',
-            text: `Успешно загружено ${total} пластинок в черновики!`,
-          });
-          onImportComplete();
-        } catch (err: any) {
-          haptic.error();
-          setResultMsg({
-            type: 'error',
-            text: err.message || 'Ошибка импорта. Проверьте права доступа.',
-          });
-        } finally {
-          setIsProcessing(false);
-          e.target.value = '';
-        }
-      },
-    });
-  };
-
-  return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-6">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2.5">
-          <FileSpreadsheet className="w-5 h-5 text-amber-500" />
-          <h3 className="font-semibold text-sm text-white">Импорт коллекции Discogs (.csv)</h3>
-        </div>
-        <label className="cursor-pointer inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs px-3.5 py-2 rounded-xl transition relative overflow-hidden select-none">
-          {isProcessing ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>
-                {progress.current}/{progress.total}
-              </span>
-            </>
-          ) : (
-            <>
-              <Upload className="w-4 h-4" />
-              <span>Загрузить CSV</span>
-            </>
-          )}
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-            disabled={isProcessing}
-            onChange={handleFileUpload}
-          />
-        </label>
-      </div>
-
-      <p className="text-xs text-zinc-400">
-        Автоматически импортирует названия, артистов, лейблы, форматы и оценки состояния из вашей коллекции Discogs.
-      </p>
-
-      {resultMsg && (
-        <div
-          className={`mt-3 p-3 rounded-xl flex items-center gap-2 text-xs ${
-            resultMsg.type === 'success'
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-              : 'bg-red-500/10 text-red-400 border border-red-500/20'
-          }`}
-        >
-          {resultMsg.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-          ) : (
-            <AlertCircle className="w-4 h-4 shrink-0" />
-          )}
-          <span>{resultMsg.text}</span>
-        </div>
-      )}
-    </div>
   );
 };
