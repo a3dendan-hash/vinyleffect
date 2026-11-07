@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { getTelegramUser } from './telegram';
 
+// Читаем переменные и убираем возможные пробелы
 const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
 const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
+// Безопасная очистка URL (если вдруг случайно попал /rest/v1 или лишние слеши)
 const getCleanSupabaseUrl = (url: string): string => {
   if (!url) return 'https://placeholder.supabase.co';
   try {
