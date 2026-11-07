@@ -5,7 +5,6 @@ export const initTelegramApp = () => {
     WebApp.ready();
     WebApp.expand();
 
-    // Синхронизация CSS-переменных с цветовой схемой Telegram
     const root = document.documentElement;
     root.style.setProperty('--tg-bg-color', WebApp.themeParams.bg_color || '#121214');
     root.style.setProperty('--tg-secondary-bg', WebApp.themeParams.secondary_bg_color || '#1c1c1f');
@@ -22,22 +21,21 @@ export const getTelegramUser = () => {
   const user = WebApp.initDataUnsafe?.user;
   if (user) return user;
 
-  // Fallback для локальной отладки в браузере
-  if (import.meta.env.DEV) {
-    return {
-      id: Number(import.meta.env.VITE_ADMIN_TELEGRAM_ID || 123456789),
-      first_name: 'DevAdmin',
-      username: 'dev_vinyl_admin',
-    };
-  }
+  // Если открыто в обычном браузере на ПК для проверки
   return null;
 };
 
 export const isAdminUser = (): boolean => {
   const user = getTelegramUser();
-  const adminId = import.meta.env.VITE_ADMIN_TELEGRAM_ID;
-  if (!user || !adminId) return false;
-  return String(user.id) === String(adminId);
+  if (!user) return false;
+
+  const rawAdmins = import.meta.env.VITE_ADMIN_TELEGRAM_ID || '';
+  const adminIds = String(rawAdmins)
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  return adminIds.includes(String(user.id));
 };
 
 export const haptic = {
