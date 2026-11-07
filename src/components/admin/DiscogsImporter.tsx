@@ -186,7 +186,7 @@ export const DiscogsImporter: React.FC<Props> = ({ onImportComplete }) => {
           <FileSpreadsheet className="w-5 h-5 text-amber-500" />
           <h3 className="font-semibold text-sm text-white">Импорт коллекции Discogs (.csv)</h3>
         </div>
-        <label className="cursor-pointer inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs px-3.5 py-2 rounded-xl transition">
+        <label className="cursor-pointer inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs px-3.5 py-2 rounded-xl transition relative overflow-hidden select-none">
           {isProcessing ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -203,7 +203,7 @@ export const DiscogsImporter: React.FC<Props> = ({ onImportComplete }) => {
           <input
             type="file"
             accept=".csv,text/csv"
-            className="hidden"
+            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             disabled={isProcessing}
             onChange={handleFileUpload}
           />
