@@ -242,7 +242,7 @@ export const AdminDashboard: React.FC = () => {
                   <div className="min-w-0 space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-[#8b5cf6] font-mono truncate">
-                        {item.release.artists.map((a) => a.name).join(', ')}
+                        {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'}
                       </span>
                       {item.release.year && (
                         <span className="text-[10px] font-mono text-[#888888]">({item.release.year})</span>

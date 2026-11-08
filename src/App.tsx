@@ -33,17 +33,19 @@ const TelegramBackButtonManager: React.FC = () => {
     };
 
     try {
-      if (location.pathname !== '/') {
-        WebApp.BackButton.show();
-        WebApp.BackButton.onClick(handleBack);
-      } else {
-        WebApp.BackButton.hide();
+      if (WebApp?.BackButton) {
+        if (location.pathname !== '/') {
+          WebApp.BackButton.show?.();
+          WebApp.BackButton.onClick?.(handleBack);
+        } else {
+          WebApp.BackButton.hide?.();
+        }
       }
     } catch {}
 
     return () => {
       try {
-        WebApp.BackButton.offClick(handleBack);
+        WebApp?.BackButton?.offClick?.(handleBack);
       } catch {}
     };
   }, [location.pathname, navigate]);
@@ -231,7 +233,7 @@ const MainLayout: React.FC = () => {
                     <div key={it.id} className="flex items-center justify-between pt-2.5">
                       <div className="min-w-0 pr-3">
                         <p className="text-[11px] font-mono text-[#8b5cf6] truncate">
-                          {it.release.artists.map((a) => a.name).join(', ')}
+                          {(it.release?.artists || []).map((a) => a.name).join(', ')}
                         </p>
                         <h4 className="text-xs font-bold text-white truncate">{it.release.title}</h4>
                         <span className="text-xs font-mono font-bold text-white">

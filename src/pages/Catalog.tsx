@@ -407,7 +407,7 @@ export const Catalog: React.FC = () => {
                     </div>
 
                     <h3 className="text-sm font-bold text-white uppercase group-hover:text-[#8b5cf6] transition-colors leading-snug truncate">
-                      {item.release.artists.map((a) => a.name).join(', ')}
+                      {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'}
                     </h3>
                     <p className="text-xs text-[#a3a3a3] truncate">{item.release.title}</p>
                   </div>

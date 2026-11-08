@@ -66,7 +66,7 @@ export const RecordDetails: React.FC = () => {
 
       if (allActiveData) {
         const allActive = allActiveData.map(mapSupabaseItem);
-        const currentArtistIds = new Set(currentItem.release.artists.map((a) => a.id));
+        const currentArtistIds = new Set((currentItem.release.artists || []).map((a) => a.id));
         const primaryGenre = currentItem.release.genre[0];
 
         const byArtist = allActive.filter((other) =>
@@ -245,7 +245,7 @@ export const RecordDetails: React.FC = () => {
         {/* Артист, Альбом, Год и Бейджи */}
         <div className="border-b border-[#222222] pb-5 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            {item.release.artists.map((artist) => (
+            {(item.release?.artists || []).map((artist) => (
               <Link
                 key={artist.id}
                 to={`/artist/${artist.id}`}
