@@ -77,17 +77,17 @@ export const Catalog: React.FC = () => {
     const list = items.filter((item) => {
       const q = query.trim().toLowerCase();
       if (q) {
-        const titleMatch = item.release.title.toLowerCase().includes(q);
-        const artistMatch = item.release.artists.some((a) => a.name.toLowerCase().includes(q));
-        const labelMatch = (item.release.label || '').toLowerCase().includes(q);
+        const titleMatch = (item.release?.title || '').toLowerCase().includes(q);
+        const artistMatch = (item.release?.artists || []).some((a) => a.name.toLowerCase().includes(q));
+        const labelMatch = (item.release?.label || '').toLowerCase().includes(q);
         if (!titleMatch && !artistMatch && !labelMatch) return false;
       }
 
       // Быстрые вкладки из дизайна Atelier Monolith
       if (genreTab === 'soviet') {
-        const isSoviet = item.release.artists.some((a) =>
+        const isSoviet = (item.release?.artists || []).some((a) =>
           /кино|цой|оборона|аквариум|ддт|наутилус|ария|зоопарк|пикник|мелодия/i.test(a.name)
-        ) || (item.release.country && /ussr|ссср|russia/i.test(item.release.country));
+        ) || (item.release?.country && /ussr|ссср|russia/i.test(item.release.country));
         if (!isSoviet) return false;
       } else if (genreTab === 'rock') {
         const isRock = item.release.genre.some((g) => /rock/i.test(g)) || item.release.style.some((s) => /rock|hard rock|metal/i.test(s));

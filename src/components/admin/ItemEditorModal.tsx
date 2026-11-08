@@ -207,7 +207,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
               Редактор пластинки · Каталог СПб
             </span>
             <h2 className="text-sm font-bold text-white truncate max-w-md">
-              {item.release.artists.map((a) => a.name).join(', ')} — {item.release.title}
+              {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'} — {item.release.title}
             </h2>
           </div>
           <button

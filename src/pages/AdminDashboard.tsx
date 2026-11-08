@@ -94,10 +94,10 @@ export const AdminDashboard: React.FC = () => {
       if (item.status !== statusFilter) return false;
 
       if (q) {
-        const titleMatch = item.release.title.toLowerCase().includes(q);
-        const artistMatch = item.release.artists.some((a) => a.name.toLowerCase().includes(q));
-        const labelMatch = (item.release.label || '').toLowerCase().includes(q);
-        const catnoMatch = (item.release.catno || '').toLowerCase().includes(q);
+        const titleMatch = (item.release?.title || '').toLowerCase().includes(q);
+        const artistMatch = (item.release?.artists || []).some((a) => a.name.toLowerCase().includes(q));
+        const labelMatch = (item.release?.label || '').toLowerCase().includes(q);
+        const catnoMatch = (item.release?.catno || '').toLowerCase().includes(q);
         if (!titleMatch && !artistMatch && !labelMatch && !catnoMatch) return false;
       }
 

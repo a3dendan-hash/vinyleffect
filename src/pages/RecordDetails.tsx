@@ -66,19 +66,19 @@ export const RecordDetails: React.FC = () => {
 
       if (allActiveData) {
         const allActive = allActiveData.map(mapSupabaseItem);
-        const currentArtistIds = new Set((currentItem.release.artists || []).map((a) => a.id));
-        const primaryGenre = currentItem.release.genre[0];
+        const currentArtistIds = new Set((currentItem.release?.artists || []).map((a) => a.id));
+        const primaryGenre = currentItem.release?.genre?.[0];
 
         const byArtist = allActive.filter((other) =>
-          other.release.artists.some((a) => currentArtistIds.has(a.id))
+          (other.release?.artists || []).some((a) => currentArtistIds.has(a.id))
         );
         setSameArtistItems(byArtist.slice(0, 6));
 
         if (primaryGenre) {
           const byGenre = allActive.filter(
             (other) =>
-              other.release.genre.includes(primaryGenre) &&
-              !other.release.artists.some((a) => currentArtistIds.has(a.id))
+              (other.release?.genre || []).includes(primaryGenre) &&
+              !(other.release?.artists || []).some((a) => currentArtistIds.has(a.id))
           );
           setSimilarGenreItems(byGenre.slice(0, 6));
         }
