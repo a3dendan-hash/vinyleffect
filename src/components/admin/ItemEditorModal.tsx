@@ -1,30 +1,37 @@
 import React, { useState } from 'react';
-import { X, Camera, Trash2, Sparkles, Loader2, Check, Globe, Upload, Image as ImageIcon } from 'lucide-react';
+import { X, Camera, Trash2, Sparkles, Loader2, Check, Globe, Upload, Image as ImageIcon, ExternalLink, Info } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { VinylItem, MediaCondition, SleeveCondition, ItemStatus } from '../../types/database';
 import { haptic } from '../../lib/telegram';
 
-const MEDIA_GRADES: MediaCondition[] = ['M', 'NM', 'VG+', 'VG', 'G+', 'G', 'F', 'P'];
-const SLEEVE_GRADES: SleeveCondition[] = ['M', 'NM', 'VG+', 'VG', 'G+', 'G', 'F', 'P', 'Generic'];
+const MEDIA_GRADES: MediaCondition[] = ['M', 'NM', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P'];
+const SLEEVE_GRADES: SleeveCondition[] = ['M', 'NM', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P', 'Generic'];
 
 interface Props {
   item: VinylItem;
   onClose: () => void;
   onSaved: () => void;
+  isOpen?: boolean;
 }
 
 export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => {
   const [price, setPrice] = useState<string>(item.price ? String(item.price) : '');
-  const [conditionMedia, setConditionMedia] = useState<MediaCondition>(item.condition_media || 'VG+');
-  const [conditionSleeve, setConditionSleeve] = useState<SleeveCondition>(item.condition_sleeve || 'VG+');
+  const [conditionMedia, setConditionMedia] = useState<MediaCondition>(item.condition_media || 'NM-');
+  const [conditionSleeve, setConditionSleeve] = useState<SleeveCondition>(item.condition_sleeve || 'NM');
+  const [releaseType, setReleaseType] = useState<string>(item.release_type || 'Оригинал');
+  const [importantDetails, setImportantDetails] = useState<string>(item.important_details || '');
+  const [extraInfo, setExtraInfo] = useState<string>(item.extra_info || '');
+  const [formatDetails, setFormatDetails] = useState<string>(item.release.format_details || '12" LP');
+  const [discogsUri, setDiscogsUri] = useState<string>(item.release.discogs_uri || '');
   const [description, setDescription] = useState<string>(item.description || '');
   const [photos, setPhotos] = useState<string[]>(item.photos || []);
-  const [coverUrl, setCoverUrl] = useState<string>(item.release.default_cover_url || '');
+  const [coverUrl, setCoverUrl] = useState<string>(item.release.default_cover_url || item.release.cover_url || '');
   const [imageUrlInput, setImageUrlInput] = useState('');
 
-  // Метаданные релиза (жанры, стили, страна, год)
+  // Метаданные релиза (жанры, стили, страна, год, лейбл)
   const [genresInput, setGenresInput] = useState<string>(item.release.genre.join(', '));
   const [stylesInput, setStylesInput] = useState<string>(item.release.style.join(', '));
+  const [label, setLabel] = useState<string>(item.release.label || '');
   const [country, setCountry] = useState<string>(item.release.country || '');
   const [year, setYear] = useState<string>(item.release.year ? String(item.release.year) : '');
 
@@ -32,7 +39,6 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
   const [fetchingDiscogs, setFetchingDiscogs] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Загрузка живых фотографий пластинки в Supabase Storage бакет 'vinyl-photos'
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -70,7 +76,6 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
     setPhotos((prev) => prev.filter((url) => url !== urlToRemove));
   };
 
-  // Автоматическое получение обложки и метаданных с Discogs по release_id
   const enrichFromDiscogs = async () => {
     const discogsId = item.release.discogs_release_id;
     if (!discogsId) {
@@ -81,7 +86,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
     setFetchingDiscogs(true);
     try {
       const res = await fetch(`https://api.discogs.com/releases/${discogsId}`, {
-        headers: { 'User-Agent': 'VinylEffectApp/1.0' },
+        headers: { 'User-Agent': 'VinylPeterMarketplace/1.0' },
       });
       if (!res.ok) throw new Error('Не удалось получить данные от Discogs API');
       const data = await res.json();
@@ -90,10 +95,29 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
       if (Array.isArray(data.styles)) setStylesInput(data.styles.join(', '));
       if (data.country) setCountry(data.country);
       if (data.year) setYear(String(data.year));
-      
-      const primaryImage = data?.images?.[0]?.uri || data?.thumb;
-      if (primaryImage && !coverUrl) {
-        setCoverUrl(primaryImage);
+      if (data.labels?.[0]?.name) setLabel(data.labels[0].name);
+      if (data.uri) setDiscogsUri(data.uri);
+
+      if (data.formats) {
+        const fmt = data.formats
+          .map((f: any) => [f.name, ...(f.descriptions || []), f.text].filter(Boolean).join(' '))
+          .join(', ');
+        setFormatDetails(fmt);
+
+        if (data.formats.some((f: any) => /coloured|color|marbled|red|white/i.test(f.text || ''))) {
+          setImportantDetails((prev) => (prev ? `${prev}, Цветной винил` : 'Цветной винил'));
+        }
+      }
+
+      if (data.identifiers) {
+        const ids = data.identifiers.map((id: any) => `${id.type}: ${id.value}`).join('\n');
+        setExtraInfo((prev) => (prev ? `${prev}\n\n${ids}` : ids));
+      }
+
+      const discogsPhotos = (data?.images || []).map((img: any) => img.uri);
+      if (discogsPhotos.length > 0) {
+        setPhotos((prev) => Array.from(new Set([...prev, ...discogsPhotos])));
+        if (!coverUrl) setCoverUrl(discogsPhotos[0]);
       }
 
       haptic.success();
@@ -107,11 +131,8 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
   const handleAddByUrl = () => {
     const trimmed = imageUrlInput.trim();
     if (!trimmed) return;
-    if (!coverUrl) {
-      setCoverUrl(trimmed);
-    } else {
-      setPhotos((prev) => [...prev, trimmed]);
-    }
+    setPhotos((prev) => [...prev, trimmed]);
+    if (!coverUrl) setCoverUrl(trimmed);
     setImageUrlInput('');
   };
 
@@ -119,7 +140,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
     const numericPrice = parseFloat(price);
     if (targetStatus === 'active' && (isNaN(numericPrice) || numericPrice <= 0)) {
       haptic.error();
-      alert('Укажите корректную цену перед публикацией пластинки на витрину.');
+      alert('Укажите корректную цену перед публикацией на витрину.');
       return;
     }
 
@@ -128,7 +149,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
       const genres = genresInput.split(',').map((s) => s.trim()).filter(Boolean);
       const styles = stylesInput.split(',').map((s) => s.trim()).filter(Boolean);
 
-      // 1. Обновляем метаданные релиза (обложка, жанры, год)
+      // 1. Обновляем реплику релиза в Supabase
       const { error: relErr } = await supabase
         .from('releases')
         .update({
@@ -136,21 +157,29 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
           style: styles,
           country: country.trim() || null,
           year: year ? parseInt(year, 10) : null,
+          label: label.trim() || null,
+          format_details: formatDetails.trim() || null,
+          discogs_uri: discogsUri.trim() || null,
           default_cover_url: coverUrl || photos[0] || null,
+          cover_url: coverUrl || photos[0] || null,
         })
         .eq('id', item.release.id);
 
       if (relErr) throw relErr;
 
-      // 2. Обновляем экземпляр пластинки
+      // 2. Обновляем конкретный экземпляр
       const { error: itemErr } = await supabase
         .from('items')
         .update({
           price: isNaN(numericPrice) ? 0 : numericPrice,
           condition_media: conditionMedia,
           condition_sleeve: conditionSleeve,
+          release_type: releaseType.trim() || null,
+          important_details: importantDetails.trim() || null,
+          extra_info: extraInfo.trim() || null,
           description: description.trim(),
           photos,
+          custom_images: photos,
           status: targetStatus,
         })
         .eq('id', item.id);
@@ -169,256 +198,276 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-zinc-900 border-t sm:border border-zinc-800 w-full max-w-lg max-h-[92vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden">
-        {/* Шапка */}
-        <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-[#111111] border-t sm:border border-[#222222] w-full max-w-2xl max-h-[92vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden text-white font-mono text-xs shadow-2xl">
+        {/* Шапка модалки */}
+        <div className="px-6 py-4 border-b border-[#222222] flex items-center justify-between bg-[#141414]">
           <div className="pr-4">
-            <span className="text-[11px] uppercase tracking-wider text-amber-500 font-semibold">
-              Предпродажная подготовка
+            <span className="text-[10px] uppercase tracking-wider text-[#8b5cf6] font-bold">
+              Редактор пластинки · Каталог СПб
             </span>
-            <h2 className="text-base font-bold text-white line-clamp-1">
+            <h2 className="text-sm font-bold text-white truncate max-w-md">
               {item.release.artists.map((a) => a.name).join(', ')} — {item.release.title}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white"
+            className="p-1.5 rounded-full bg-[#1f1f1f] text-[#888888] hover:text-white transition"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Тело формы */}
-        <div className="p-5 overflow-y-auto space-y-5 text-sm">
-          {/* Управление обложкой и фото */}
-          <div className="space-y-3 bg-zinc-950 p-3.5 rounded-2xl border border-zinc-800">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
-                <ImageIcon className="w-4 h-4 text-amber-500" />
-                Обложка и фотографии
-              </span>
+        <div className="p-6 overflow-y-auto space-y-4">
+          {/* Блок быстрого обогащения Discogs */}
+          <div className="bg-[#141414] border border-[#222222] p-3.5 rounded-2xl flex items-center justify-between">
+            <div>
+              <span className="text-white font-bold block">ID релиза Discogs: #{item.release.discogs_release_id || '—'}</span>
+              <span className="text-[11px] text-[#737373]">Автоматически подтягивает фото, стили, страну и матрицы</span>
+            </div>
+            {item.release.discogs_release_id && (
+              <button
+                type="button"
+                onClick={enrichFromDiscogs}
+                disabled={fetchingDiscogs}
+                className="px-3 py-1.5 bg-[#8b5cf6] hover:bg-[#7c3aed] text-white rounded-xl flex items-center gap-1.5 font-semibold transition"
+              >
+                {fetchingDiscogs ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+                <span>Синхронизировать</span>
+              </button>
+            )}
+          </div>
 
-              {item.release.discogs_release_id && (
-                <button
-                  type="button"
-                  onClick={enrichFromDiscogs}
-                  disabled={fetchingDiscogs}
-                  className="text-xs bg-zinc-800 hover:bg-zinc-700 text-amber-400 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition"
-                >
-                  {fetchingDiscogs ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
-                  <span>Заполнить из Discogs</span>
-                </button>
-              )}
+          {/* Цена и статус */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#141414] p-3.5 rounded-2xl border border-[#222222]">
+            <div>
+              <label className="block text-[#888888] mb-1">Цена продажи (₽)</label>
+              <input
+                type="number"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="4900"
+                className="w-full bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white font-bold text-sm focus:border-[#8b5cf6] focus:outline-none"
+              />
             </div>
 
-            {/* Превью */}
-            <div className="flex gap-2 overflow-x-auto py-1">
-              {coverUrl && (
-                <div className="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-amber-500 shrink-0">
-                  <img src={coverUrl} alt="Обложка" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => setCoverUrl('')}
-                    className="absolute top-1 right-1 bg-black/70 text-red-400 p-1 rounded"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-              {photos.map((url, idx) => (
-                <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-zinc-700 shrink-0">
-                  <img src={url} alt="Фото" className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removePhoto(url)}
-                    className="absolute top-1 right-1 bg-black/70 text-red-400 p-1 rounded"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
+            <div>
+              <label className="block text-[#888888] mb-1">Тип издания</label>
+              <select
+                value={releaseType}
+                onChange={(e) => setReleaseType(e.target.value)}
+                className="w-full bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white focus:outline-none"
+              >
+                <option value="Оригинал">Оригинал (Original Press)</option>
+                <option value="Переиздание">Переиздание (Reissue)</option>
+                <option value="Коллекционное">Коллекционное издание</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Состояние пластинки и конверта */}
+          <div className="grid grid-cols-2 gap-3 bg-[#141414] p-3.5 rounded-2xl border border-[#222222]">
+            <div>
+              <label className="block text-[#888888] mb-1">Состояние винила (Media)</label>
+              <select
+                value={conditionMedia}
+                onChange={(e) => setConditionMedia(e.target.value as MediaCondition)}
+                className="w-full bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white focus:outline-none"
+              >
+                {MEDIA_GRADES.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Добавление по ссылке или файлом */}
-            <div className="flex gap-2">
+            <div>
+              <label className="block text-[#888888] mb-1">Состояние конверта (Sleeve)</label>
+              <select
+                value={conditionSleeve}
+                onChange={(e) => setConditionSleeve(e.target.value as SleeveCondition)}
+                className="w-full bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white focus:outline-none"
+              >
+                {SLEEVE_GRADES.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Важные детали и формат */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[#888888] mb-1">Важные детали (через запятую)</label>
               <input
                 type="text"
+                value={importantDetails}
+                onChange={(e) => setImportantDetails(e.target.value)}
+                placeholder="Limited edition, Numbered, Цветной винил"
+                className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white focus:border-[#8b5cf6] focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[#888888] mb-1">Формат пластинки</label>
+              <input
+                type="text"
+                value={formatDetails}
+                onChange={(e) => setFormatDetails(e.target.value)}
+                placeholder='12" EP, 45 RPM, Maxi Single'
+                className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white focus:border-[#8b5cf6] focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Лейбл, Страна, Год */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[#888888] mb-1">Лейбл</label>
+              <input
+                type="text"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Mute, Melodiya..."
+                className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[#888888] mb-1">Страна</label>
+              <input
+                type="text"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                placeholder="Germany, UK, СССР"
+                className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[#888888] mb-1">Год релиза</label>
+              <input
+                type="number"
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                placeholder="1984"
+                className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Дополнительная информация и матрицы */}
+          <div>
+            <label className="block text-[#888888] mb-1">Дополнительная информация (Matrix / Runout / Каталожный номер)</label>
+            <textarea
+              rows={3}
+              value={extraInfo}
+              onChange={(e) => setExtraInfo(e.target.value)}
+              placeholder="L12 Bong 5 / INT 126.821&#10;Red Marbled Vinyl"
+              className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white focus:outline-none"
+            />
+          </div>
+
+          {/* Ссылка на Discogs */}
+          <div>
+            <label className="block text-[#888888] mb-1">Ссылка на релиз на Discogs</label>
+            <input
+              type="url"
+              value={discogsUri}
+              onChange={(e) => setDiscogsUri(e.target.value)}
+              placeholder="https://www.discogs.com/release/24395"
+              className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white focus:outline-none"
+            />
+          </div>
+
+          {/* Фотографии */}
+          <div className="space-y-2 bg-[#141414] p-3.5 rounded-2xl border border-[#222222]">
+            <div className="flex items-center justify-between">
+              <span className="text-white font-bold flex items-center gap-1.5">
+                <Camera className="w-4 h-4 text-[#8b5cf6]" />
+                Фотографии ({photos.length})
+              </span>
+              <label className="cursor-pointer text-[#8b5cf6] hover:underline flex items-center gap-1">
+                <Upload className="w-3.5 h-3.5" />
+                <span>Загрузить с диска</span>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                  disabled={uploading}
+                />
+              </label>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="url"
                 value={imageUrlInput}
                 onChange={(e) => setImageUrlInput(e.target.value)}
-                placeholder="Ссылка на фото..."
-                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
+                placeholder="Или вставьте прямую ссылку на фото..."
+                className="flex-1 bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl px-3 py-1.5 text-white focus:outline-none"
               />
               <button
                 type="button"
                 onClick={handleAddByUrl}
-                className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs px-3 py-2 rounded-xl shrink-0"
+                className="px-3 py-1.5 bg-[#262626] hover:bg-[#333333] text-white rounded-xl"
               >
-                По ссылке
+                Добавить
               </button>
-              <label className="cursor-pointer bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 relative overflow-hidden shrink-0">
-                {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                <span>Свое фото</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  disabled={uploading}
-                  onChange={handlePhotoUpload}
-                />
-              </label>
-            </div>
-          </div>
-
-          {/* Цена */}
-          <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">Цена (₽)</label>
-            <input
-              type="number"
-              placeholder="Например: 4500"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white font-semibold focus:border-amber-500 focus:outline-none"
-            />
-          </div>
-
-          {/* Состояние винила */}
-          <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-              Состояние пластинки (Media — Goldmine)
-            </label>
-            <div className="grid grid-cols-4 gap-1.5">
-              {MEDIA_GRADES.map((grade) => (
-                <button
-                  key={grade}
-                  type="button"
-                  onClick={() => {
-                    haptic.selection();
-                    setConditionMedia(grade);
-                  }}
-                  className={`py-2 rounded-xl text-xs font-bold border transition ${
-                    conditionMedia === grade
-                      ? 'bg-amber-500 text-black border-amber-500'
-                      : 'bg-zinc-950 text-zinc-300 border-zinc-800'
-                  }`}
-                >
-                  {grade}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Состояние конверта */}
-          <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-              Состояние конверта (Sleeve — Goldmine)
-            </label>
-            <div className="grid grid-cols-5 gap-1.5">
-              {SLEEVE_GRADES.map((grade) => (
-                <button
-                  key={grade}
-                  type="button"
-                  onClick={() => {
-                    haptic.selection();
-                    setConditionSleeve(grade);
-                  }}
-                  className={`py-2 rounded-xl text-xs font-bold border transition ${
-                    conditionSleeve === grade
-                      ? 'bg-amber-500 text-black border-amber-500'
-                      : 'bg-zinc-950 text-zinc-300 border-zinc-800'
-                  }`}
-                >
-                  {grade}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Метаданные релиза */}
-          <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-3.5 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-300">Метаданные релиза</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className="block text-[11px] text-zinc-400 mb-1">Жанры (через запятую)</label>
-                <input
-                  type="text"
-                  placeholder="Rock, Jazz"
-                  value={genresInput}
-                  onChange={(e) => setGenresInput(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
+            {photos.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pt-2">
+                {photos.map((url, idx) => (
+                  <div key={idx} className="relative w-16 h-16 rounded-xl overflow-hidden border border-[#333333] shrink-0 group">
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(url)}
+                      className="absolute inset-0 bg-red-950/80 text-red-300 opacity-0 group-hover:opacity-100 flex items-center justify-center transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
               </div>
-              <div>
-                <label className="block text-[11px] text-zinc-400 mb-1">Стили (через запятую)</label>
-                <input
-                  type="text"
-                  placeholder="Psychedelic Rock"
-                  value={stylesInput}
-                  onChange={(e) => setStylesInput(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-zinc-400 mb-1">Страна</label>
-                <input
-                  type="text"
-                  placeholder="UK / US / Japan"
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-zinc-400 mb-1">Год</label>
-                <input
-                  type="number"
-                  placeholder="1975"
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Описание */}
-          <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-              Описание особенностей / матрицы / комплектации
-            </label>
-            <textarea
-              rows={3}
-              placeholder="Первый британский пресс..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white text-xs focus:border-amber-500 focus:outline-none"
-            />
+            )}
           </div>
         </div>
 
-        {/* Подвал с действиями */}
-        <div className="p-4 border-t border-zinc-800 bg-zinc-950 flex gap-2.5">
+        {/* Футер с кнопками сохранения */}
+        <div className="px-6 py-4 border-t border-[#222222] bg-[#141414] flex items-center justify-between gap-3">
           <button
             type="button"
-            disabled={saving}
-            onClick={() => handleSave('draft')}
-            className="flex-1 py-3 rounded-2xl border border-zinc-700 text-zinc-300 font-semibold text-xs hover:bg-zinc-800 transition"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl text-[#888888] hover:text-white"
           >
-            В черновики
+            Отмена
           </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => handleSave('active')}
-            className="flex-1 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs flex items-center justify-center gap-1.5 transition"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            <span>На витрину</span>
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleSave('draft')}
+              className="px-4 py-2.5 bg-[#1f1f1f] hover:bg-[#2a2a2a] text-[#cccccc] hover:text-white rounded-xl transition"
+            >
+              Сохранить в черновики
+            </button>
+
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleSave('active')}
+              className="px-5 py-2.5 bg-white hover:bg-[#8b5cf6] text-black hover:text-white font-bold rounded-xl transition shadow"
+            >
+              {saving ? 'Сохранение...' : 'Опубликовать на витрину'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -11,6 +11,7 @@ import {
   Phone,
   Truck,
   CreditCard,
+  Tag,
 } from 'lucide-react';
 import { supabase, ITEM_WITH_GRAPH_SELECT } from '../lib/supabase';
 import { VinylItem, mapSupabaseItem } from '../types/database';
@@ -25,6 +26,7 @@ export const Catalog: React.FC = () => {
 
   // Поисковые и фильтрующие состояния
   const [query, setQuery] = useState('');
+  const [genreTab, setGenreTab] = useState<'all' | 'soviet' | 'rock' | 'jazz' | 'synth'>('all');
   const [selectedGenre, setSelectedGenre] = useState<string>(searchParams.get('genre') || '');
   const [selectedStyle, setSelectedStyle] = useState<string>(searchParams.get('style') || '');
   const [selectedLabel, setSelectedLabel] = useState<string>(searchParams.get('label') || '');
@@ -58,7 +60,6 @@ export const Catalog: React.FC = () => {
     loadActiveCatalog();
   }, []);
 
-  // Динамическое формирование списков доступных жанров, стилей и лейблов
   const allGenres = useMemo(
     () => Array.from(new Set(items.flatMap((i) => i.release.genre))).filter(Boolean).sort(),
     [items]
@@ -82,6 +83,23 @@ export const Catalog: React.FC = () => {
         if (!titleMatch && !artistMatch && !labelMatch) return false;
       }
 
+      // Быстрые вкладки из дизайна Atelier Monolith
+      if (genreTab === 'soviet') {
+        const isSoviet = item.release.artists.some((a) =>
+          /кино|цой|оборона|аквариум|ддт|наутилус|ария|зоопарк|пикник|мелодия/i.test(a.name)
+        ) || (item.release.country && /ussr|ссср|russia/i.test(item.release.country));
+        if (!isSoviet) return false;
+      } else if (genreTab === 'rock') {
+        const isRock = item.release.genre.some((g) => /rock/i.test(g)) || item.release.style.some((s) => /rock|hard rock|metal/i.test(s));
+        if (!isRock) return false;
+      } else if (genreTab === 'jazz') {
+        const isJazz = item.release.genre.some((g) => /jazz|funk|soul|blues/i.test(g));
+        if (!isJazz) return false;
+      } else if (genreTab === 'synth') {
+        const isSynth = item.release.genre.some((g) => /electronic|synth/i.test(g)) || item.release.style.some((s) => /synth-pop|new wave|post-punk|industrial/i.test(s));
+        if (!isSynth) return false;
+      }
+
       if (selectedGenre && !item.release.genre.includes(selectedGenre)) return false;
       if (selectedStyle && !item.release.style.includes(selectedStyle)) return false;
       if (selectedLabel && item.release.label !== selectedLabel) return false;
@@ -97,11 +115,12 @@ export const Catalog: React.FC = () => {
       if (sortBy === 'year_desc') return (b.release.year || 0) - (a.release.year || 0);
       return 0;
     });
-  }, [items, query, selectedGenre, selectedStyle, selectedLabel, selectedCondition, maxPrice, sortBy]);
+  }, [items, query, genreTab, selectedGenre, selectedStyle, selectedLabel, selectedCondition, maxPrice, sortBy]);
 
   const resetAllFilters = () => {
     haptic.light();
     setQuery('');
+    setGenreTab('all');
     setSelectedGenre('');
     setSelectedStyle('');
     setSelectedLabel('');
@@ -112,86 +131,93 @@ export const Catalog: React.FC = () => {
   };
 
   const hasActiveFilters = Boolean(
-    selectedGenre || selectedStyle || selectedLabel || selectedCondition || maxPrice || sortBy !== 'newest'
+    genreTab !== 'all' || selectedGenre || selectedStyle || selectedLabel || selectedCondition || maxPrice || sortBy !== 'newest'
   );
 
   return (
     <div className="pb-24">
-      {/* Приветственный баннер "О магазине, оплате и доставке" */}
-      <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 mb-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-1 space-y-1.5">
-          <h2 className="text-sm font-bold text-white">Добро пожаловать в VinylEffect!</h2>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            Кураторский магазин виниловых пластинок. Бережная оценка по стандарту Goldmine и надежная упаковка.
-          </p>
-          <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
-            <span className="inline-flex items-center gap-1 text-zinc-300">
-              <MapPin className="w-3.5 h-3.5 text-amber-500" />
-              г. Санкт-Петербург
+      {/* Баннер "ВИНИЛПИТЕР" в стиле Swiss Minimal */}
+      <section className="pt-2 pb-6 border-b border-[#1f1f1f] mb-6">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div>
+            <span className="text-[11px] font-mono text-[#8b5cf6] uppercase tracking-widest block mb-1">
+              МАГАЗИН ОРИГИНАЛЬНОГО ВИНИЛА
             </span>
-            <a
-              href="tel:+79679675105"
-              className="inline-flex items-center gap-1 text-amber-400 font-bold hover:underline"
-            >
-              <Phone className="w-3.5 h-3.5" />
-              +7 967 967-51-05
-            </a>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+              ПЛАСТИНКИ В НАЛИЧИИ В СПБ
+            </h1>
+          </div>
+          <div className="text-xs text-[#888888] font-mono max-w-md">
+            Все экземпляры оценены по стандарту Goldmine. Фотографии реальных конвертов и дисков.
+            <div className="pt-1 text-white flex items-center gap-2">
+              <MapPin className="w-3.5 h-3.5 text-[#8b5cf6]" />
+              <span>Санкт-Петербург · Рубинштейна</span>
+              <a href="tel:+79219675106" className="text-[#8b5cf6] hover:underline font-bold ml-1">
+                +7 921 967-51-06
+              </a>
+            </div>
           </div>
         </div>
+      </section>
 
-        <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
-            <CreditCard className="w-3.5 h-3.5" />
-            <span>Оплата</span>
-          </div>
-          <ul className="text-[11px] text-zinc-300 space-y-1 list-disc list-inside">
-            <li>Наличными при встрече (в пределах Санкт-Петербурга и его окрестностей);</li>
-            <li>Перевод на карту Сбербанка (из любого отделения Сбербанка РФ).</li>
-          </ul>
-        </div>
-
-        <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3 space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
-            <Truck className="w-3.5 h-3.5" />
-            <span>Доставка</span>
-          </div>
-          <p className="text-[11px] text-zinc-300 leading-relaxed">
-            Доставка осуществляется <strong>Почтой России</strong>, <strong>Яндекс Доставкой</strong>, <strong>СДЭКом</strong>, а также возможна личная встреча в Санкт-Петербурге.
-          </p>
-        </div>
+      {/* Быстрые переключатели жанров из code.html */}
+      <div className="flex items-center space-x-2 overflow-x-auto pb-2 mb-4 scrollbar-none font-mono text-xs">
+        {[
+          { key: 'all', label: `Все (${items.length})` },
+          { key: 'soviet', label: 'Русский рок' },
+          { key: 'rock', label: 'Классический рок' },
+          { key: 'jazz', label: 'Джаз / Фанк' },
+          { key: 'synth', label: 'Синти / Пост-панк' },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => {
+              haptic.selection();
+              setGenreTab(tab.key as any);
+            }}
+            className={`px-3.5 py-2 rounded-xl transition border shrink-0 ${
+              genreTab === tab.key
+                ? 'bg-white text-black font-semibold border-white'
+                : 'bg-[#141414] text-[#a3a3a3] hover:text-white border-[#222222]'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Живой поиск, сортировка и кнопка фильтров */}
-      <div className="flex flex-col sm:flex-row gap-2.5 mb-3">
+      {/* Поиск и фильтры */}
+      <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
         <div className="relative flex-1">
-          <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#666666] absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Поиск по альбому, исполнителю или лейблу..."
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl pl-10 pr-9 py-2.5 text-sm text-white placeholder-zinc-500 focus:border-amber-500 focus:outline-none"
+            placeholder="Поиск по исполнителю, альбому или лейблу..."
+            className="w-full bg-[#111111] border border-[#262626] rounded-2xl pl-10 pr-9 py-2.5 text-xs font-mono text-white placeholder-[#666666] focus:border-[#8b5cf6] focus:outline-none"
           />
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#737373] hover:text-white"
             >
               <X className="w-4 h-4" />
             </button>
           )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 font-mono text-xs">
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
-            className="bg-zinc-900 border border-zinc-800 rounded-2xl px-3.5 py-2.5 text-xs font-semibold text-white focus:outline-none focus:border-amber-500 flex-1 sm:flex-none"
+            className="bg-[#111111] border border-[#262626] rounded-2xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#8b5cf6] flex-1 sm:flex-none"
           >
             <option value="newest">Сначала новые</option>
-            <option value="price_asc">Сначала дешевле</option>
-            <option value="price_desc">Сначала дороже</option>
-            <option value="year_desc">По году релиза</option>
+            <option value="price_asc">По цене (возрастание)</option>
+            <option value="price_desc">По цене (убывание)</option>
+            <option value="year_desc">По году выпуска</option>
           </select>
 
           <button
@@ -199,10 +225,10 @@ export const Catalog: React.FC = () => {
               haptic.light();
               setShowFilters((prev) => !prev);
             }}
-            className={`px-4 py-2.5 rounded-2xl border flex items-center gap-1.5 text-xs font-semibold transition ${
+            className={`px-4 py-2.5 rounded-2xl border flex items-center gap-1.5 transition ${
               showFilters || hasActiveFilters
-                ? 'bg-amber-500 text-black border-amber-500'
-                : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:border-zinc-700'
+                ? 'bg-[#8b5cf6] text-white border-[#8b5cf6]'
+                : 'bg-[#111111] text-[#a3a3a3] border-[#262626] hover:text-white'
             }`}
           >
             <SlidersHorizontal className="w-4 h-4" />
@@ -211,52 +237,47 @@ export const Catalog: React.FC = () => {
         </div>
       </div>
 
-      {/* Активные чипсы фильтров */}
+      {/* Активные фильтры */}
       {hasActiveFilters && (
-        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-4 font-mono text-xs">
+          {genreTab !== 'all' && (
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
+              Раздел: {genreTab}
+            </span>
+          )}
           {selectedGenre && (
-            <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs px-2.5 py-1 rounded-full">
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
               Жанр: {selectedGenre}
             </span>
           )}
           {selectedStyle && (
-            <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs px-2.5 py-1 rounded-full">
-              Стиль: {selectedStyle}
-            </span>
-          )}
-          {selectedLabel && (
-            <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs px-2.5 py-1 rounded-full">
-              Лейбл: {selectedLabel}
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
+              Стиль: #{selectedStyle}
             </span>
           )}
           {selectedCondition && (
-            <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs px-2.5 py-1 rounded-full">
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
               Состояние: {selectedCondition}
-            </span>
-          )}
-          {maxPrice && (
-            <span className="inline-flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs px-2.5 py-1 rounded-full">
-              До {maxPrice} ₽
             </span>
           )}
           <button
             onClick={resetAllFilters}
-            className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-white ml-1"
+            className="text-xs text-[#888888] hover:text-white underline ml-1"
           >
-            <X className="w-3.5 h-3.5" /> Сбросить все
+            Сбросить все
           </button>
         </div>
       )}
 
-      {/* Раскрывающаяся панель расширенных фильтров */}
+      {/* Панель фильтрации */}
       {showFilters && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+        <div className="bg-[#111111] border border-[#222222] rounded-2xl p-4 mb-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-xs font-mono">
           <div>
-            <label className="block text-zinc-400 mb-1">Жанр</label>
+            <label className="block text-[#888888] mb-1">Жанр</label>
             <select
               value={selectedGenre}
               onChange={(e) => setSelectedGenre(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-white"
+              className="w-full bg-[#171717] border border-[#262626] rounded-xl px-2.5 py-2 text-white"
             >
               <option value="">Все жанры</option>
               {allGenres.map((g) => (
@@ -268,46 +289,30 @@ export const Catalog: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-zinc-400 mb-1">Стиль</label>
+            <label className="block text-[#888888] mb-1">Стиль</label>
             <select
               value={selectedStyle}
               onChange={(e) => setSelectedStyle(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-white"
+              className="w-full bg-[#171717] border border-[#262626] rounded-xl px-2.5 py-2 text-white"
             >
               <option value="">Все стили</option>
               {allStyles.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  #{s}
                 </option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="block text-zinc-400 mb-1">Лейбл</label>
-            <select
-              value={selectedLabel}
-              onChange={(e) => setSelectedLabel(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-white"
-            >
-              <option value="">Все лейблы</option>
-              {allLabels.map((l) => (
-                <option key={l} value={l}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-zinc-400 mb-1">Состояние пластинки</label>
+            <label className="block text-[#888888] mb-1">Состояние (Goldmine)</label>
             <select
               value={selectedCondition}
               onChange={(e) => setSelectedCondition(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-white"
+              className="w-full bg-[#171717] border border-[#262626] rounded-xl px-2.5 py-2 text-white"
             >
               <option value="">Любое</option>
-              {['M', 'NM', 'VG+', 'VG', 'G+', 'G'].map((c) => (
+              {['M', 'NM', 'EX', 'VG+', 'VG', 'G+', 'G'].map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -315,94 +320,120 @@ export const Catalog: React.FC = () => {
             </select>
           </div>
 
-          <div className="col-span-2 sm:col-span-1">
-            <label className="block text-zinc-400 mb-1">Цена до (₽)</label>
+          <div>
+            <label className="block text-[#888888] mb-1">Макс. цена (₽)</label>
             <input
               type="number"
-              placeholder="Без лимита"
               value={maxPrice}
               onChange={(e) => setMaxPrice(e.target.value)}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-white"
+              placeholder="До..."
+              className="w-full bg-[#171717] border border-[#262626] rounded-xl px-2.5 py-2 text-white"
             />
           </div>
         </div>
       )}
 
-      {/* Сетка карточек пластинок (до 5 в ряд на ПК) */}
+      {/* Сетка пластинок витрины */}
       {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-            <div key={n} className="bg-zinc-900 rounded-2xl h-64 animate-pulse" />
-          ))}
+        <div className="py-24 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full vinyl-grooves spin-vinyl mx-auto" />
+          <p className="text-xs font-mono text-[#888888]">Загрузка каталога винила...</p>
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="text-center py-16 text-zinc-500 text-sm">
-          Пластинки по заданным параметрам не найдены.
+        <div className="py-20 text-center space-y-3 bg-[#111111] border border-[#222222] rounded-3xl p-8">
+          <Disc3 className="w-12 h-12 text-[#444444] mx-auto" />
+          <h3 className="font-bold text-white text-base">Ничего не найдено</h3>
+          <p className="text-xs text-[#888888] font-mono">
+            Попробуйте изменить запрос поиска или сбросить активные фильтры.
+          </p>
+          <button
+            onClick={resetAllFilters}
+            className="px-4 py-2 bg-white text-black font-mono font-semibold text-xs rounded-xl"
+          >
+            Сбросить фильтры
+          </button>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {filteredItems.map((item) => {
             const cover = item.photos[0] || item.release.default_cover_url;
             const inCart = isInCart(item.id);
 
             return (
-              <div
+              <article
                 key={item.id}
-                className="bg-zinc-900 border border-zinc-800/90 rounded-2xl overflow-hidden flex flex-col justify-between group hover:border-zinc-700 transition"
+                className="group bg-[#111111] border border-[#222222] hover:border-[#383838] transition-all flex flex-col justify-between rounded-2xl overflow-hidden shadow-lg"
               >
-                <Link to={`/record/${item.id}`} className="block">
-                  <div className="relative aspect-square bg-zinc-950 flex items-center justify-center overflow-hidden">
+                <div>
+                  <Link
+                    to={`/record/${item.id}`}
+                    onClick={() => haptic.light()}
+                    className="relative block w-full aspect-square overflow-hidden bg-black border-b border-[#222222]"
+                  >
                     {cover ? (
                       <img
                         src={cover}
                         alt={item.release.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                        className="w-full h-full object-cover grayscale-[15%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-300"
                       />
                     ) : (
-                      <Disc3 className="w-12 h-12 text-zinc-700" />
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Disc3 className="w-12 h-12 text-[#333333]" />
+                      </div>
                     )}
 
-                    {/* Бейдж состояния Goldmine */}
-                    {item.condition_media && (
-                      <span className="absolute top-2 left-2 bg-black/75 backdrop-blur-md text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded-lg border border-amber-500/30">
-                        {item.condition_media} / {item.condition_sleeve}
+                    <div className="absolute top-2.5 left-2.5">
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-[#0a0a0a]/90 border border-[#333333] text-[#f5f5f5] rounded">
+                        {item.condition_media || 'NM'} • {item.release_type || 'Оригинал'}
                       </span>
-                    )}
+                    </div>
 
-                    {item.release.year && (
-                      <span className="absolute bottom-2 right-2 bg-black/70 text-zinc-300 text-[10px] px-1.5 py-0.5 rounded-md">
-                        {item.release.year}
+                    {item.important_details?.includes('Цветной') && (
+                      <div className="absolute top-2.5 right-2.5">
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-900/90 text-purple-200 border border-purple-700 rounded">
+                          Цветной винил
+                        </span>
+                      </div>
+                    )}
+                  </Link>
+
+                  <div className="p-4 space-y-1">
+                    <div className="flex items-center justify-between text-[11px] font-mono text-[#737373]">
+                      <span>
+                        {item.release.label ? `${item.release.label}` : 'Лейбл'}
+                        {item.release.year ? ` • ${item.release.year}` : ''}
                       </span>
-                    )}
-                  </div>
+                      <span>{item.release.country || 'Импорт'}</span>
+                    </div>
 
-                  <div className="p-3 pb-2">
-                    <p className="text-[11px] text-amber-400 font-medium truncate">
+                    <h3 className="text-sm font-bold text-white uppercase group-hover:text-[#8b5cf6] transition-colors leading-snug truncate">
                       {item.release.artists.map((a) => a.name).join(', ')}
-                    </p>
-                    <h3 className="text-xs font-bold text-white line-clamp-1 mt-0.5">
-                      {item.release.title}
                     </h3>
+                    <p className="text-xs text-[#a3a3a3] truncate">{item.release.title}</p>
                   </div>
-                </Link>
+                </div>
 
-                <div className="px-3 pb-3 pt-1 flex items-center justify-between">
-                  <span className="text-sm font-extrabold text-white">
-                    {item.price.toLocaleString('ru-RU')} ₽
+                <div className="p-4 pt-2 border-t border-[#1a1a1a] flex items-center justify-between">
+                  <span className="text-sm font-semibold font-mono text-white">
+                    {item.price > 0 ? `${item.price.toLocaleString('ru-RU')} ₽` : 'По запросу'}
                   </span>
+
                   <button
-                    onClick={() => addToCart(item)}
+                    onClick={() => {
+                      haptic.light();
+                      addToCart(item);
+                    }}
                     disabled={inCart}
-                    className={`p-2 rounded-xl transition ${
+                    className={`px-3.5 py-1.5 font-mono text-xs rounded-xl transition border ${
                       inCart
-                        ? 'bg-emerald-500/20 text-emerald-400'
-                        : 'bg-amber-500 hover:bg-amber-400 text-black'
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                        : 'bg-[#1a1a1a] hover:bg-white text-[#d4d4d4] hover:text-black border-[#2c2c2c] hover:border-white'
                     }`}
                   >
-                    {inCart ? <Check className="w-4 h-4" /> : <ShoppingBag className="w-4 h-4" />}
+                    {inCart ? 'В корзине' : 'В корзину'}
                   </button>
                 </div>
-              </div>
+              </article>
             );
           })}
         </div>
