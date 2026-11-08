@@ -18,6 +18,39 @@ export const supabase = createClient(rawUrl, rawKey, {
   },
 });
 
+// Легковесный запрос для каталога и админки (мгновенная загрузка всех 2900 пластинок без тяжелых треклистов и описаний)
+export const ITEM_CATALOG_SELECT = `
+  id,
+  price,
+  status,
+  condition_media,
+  condition_sleeve,
+  release_type,
+  important_details,
+  photos,
+  custom_images,
+  created_at,
+  release:releases (
+    id,
+    title,
+    year,
+    country,
+    label,
+    catno,
+    discogs_release_id,
+    discogs_uri,
+    genre,
+    style,
+    default_cover_url,
+    cover_url,
+    format_details,
+    release_artists (
+      artist:artists (id, name)
+    )
+  )
+`;
+
+// Полный запрос с треклистом, описанием и всеми фото для страницы конкретной пластинки
 export const ITEM_WITH_GRAPH_SELECT = `
   *,
   release:releases (
