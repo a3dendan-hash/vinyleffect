@@ -9,19 +9,23 @@ import {
   Check,
   MapPin,
   Phone,
-  Truck,
-  CreditCard,
-  Tag,
+  ChevronDown,
+  Loader2,
 } from 'lucide-react';
 import { supabase, ITEM_WITH_GRAPH_SELECT } from '../lib/supabase';
 import { VinylItem, mapSupabaseItem } from '../types/database';
 import { useCart } from '../context/CartContext';
 import { haptic } from '../lib/telegram';
 
+const PAGE_SIZE = 24;
+
 export const Catalog: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<VinylItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
 
   // Поисковые и фильтрующие состояния
@@ -42,23 +46,51 @@ export const Catalog: React.FC = () => {
     setSelectedLabel(searchParams.get('label') || '');
   }, [searchParams]);
 
-  useEffect(() => {
-    const loadActiveCatalog = async () => {
+  const loadActiveCatalog = async (pageToLoad = 0, reset = false) => {
+    if (reset) {
       setLoading(true);
+      setPage(0);
+    } else {
+      setLoadingMore(true);
+    }
+
+    const from = pageToLoad * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
+    try {
       const { data, error } = await supabase
         .from('items')
         .select(ITEM_WITH_GRAPH_SELECT)
         .eq('status', 'active')
-        .range(0, 4999)
+        .range(from, to)
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        setItems(data.map(mapSupabaseItem));
+        const mapped = data.map(mapSupabaseItem);
+        if (reset) {
+          setItems(mapped);
+        } else {
+          setItems((prev) => [...prev, ...mapped]);
+        }
+        setHasMore(mapped.length === PAGE_SIZE);
+        setPage(pageToLoad);
       }
+    } finally {
       setLoading(false);
-    };
-    loadActiveCatalog();
+      setLoadingMore(false);
+    }
+  };
+
+  useEffect(() => {
+    loadActiveCatalog(0, true);
   }, []);
+
+  const loadMoreCatalog = () => {
+    if (!loadingMore && hasMore) {
+      haptic.light();
+      loadActiveCatalog(page + 1, false);
+    }
+  };
 
   const allGenres = useMemo(
     () => Array.from(new Set(items.flatMap((i) => i.release.genre))).filter(Boolean).sort(),
@@ -66,10 +98,6 @@ export const Catalog: React.FC = () => {
   );
   const allStyles = useMemo(
     () => Array.from(new Set(items.flatMap((i) => i.release.style))).filter(Boolean).sort(),
-    [items]
-  );
-  const allLabels = useMemo(
-    () => Array.from(new Set(items.map((i) => i.release.label || ''))).filter(Boolean).sort(),
     [items]
   );
 
@@ -163,7 +191,7 @@ export const Catalog: React.FC = () => {
       {/* Быстрые переключатели жанров из code.html */}
       <div className="flex items-center space-x-2 overflow-x-auto pb-2 mb-4 scrollbar-none font-mono text-xs">
         {[
-          { key: 'all', label: `Все (${items.length})` },
+          { key: 'all', label: `Все в наличии (${items.length})` },
           { key: 'soviet', label: 'Русский рок' },
           { key: 'rock', label: 'Классический рок' },
           { key: 'jazz', label: 'Джаз / Фанк' },
@@ -312,7 +340,7 @@ export const Catalog: React.FC = () => {
               className="w-full bg-[#171717] border border-[#262626] rounded-xl px-2.5 py-2 text-white"
             >
               <option value="">Любое</option>
-              {['M', 'NM', 'EX', 'VG+', 'VG', 'G+', 'G'].map((c) => (
+              {['M', 'NM', 'NM-', 'EX', 'VG+', 'VG', 'G+', 'G'].map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -354,89 +382,115 @@ export const Catalog: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {filteredItems.map((item) => {
-            const cover = item.photos[0] || item.release.default_cover_url;
-            const inCart = isInCart(item.id);
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {filteredItems.map((item) => {
+              const cover = item.photos[0] || item.release.default_cover_url;
+              const inCart = isInCart(item.id);
 
-            return (
-              <article
-                key={item.id}
-                className="group bg-[#111111] border border-[#222222] hover:border-[#383838] transition-all flex flex-col justify-between rounded-2xl overflow-hidden shadow-lg"
-              >
-                <div>
-                  <Link
-                    to={`/record/${item.id}`}
-                    onClick={() => haptic.light()}
-                    className="relative block w-full aspect-square overflow-hidden bg-black border-b border-[#222222]"
-                  >
-                    {cover ? (
-                      <img
-                        src={cover}
-                        alt={item.release.title}
-                        className="w-full h-full object-cover grayscale-[15%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-300"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Disc3 className="w-12 h-12 text-[#333333]" />
-                      </div>
-                    )}
+              return (
+                <article
+                  key={item.id}
+                  className="group bg-[#111111] border border-[#222222] hover:border-[#383838] transition-all flex flex-col justify-between rounded-2xl overflow-hidden shadow-lg"
+                >
+                  <div>
+                    <Link
+                      to={`/record/${item.id}`}
+                      onClick={() => haptic.light()}
+                      className="relative block w-full aspect-square overflow-hidden bg-black border-b border-[#222222]"
+                    >
+                      {cover ? (
+                        <img
+                          src={cover}
+                          alt={item.release.title}
+                          loading="lazy"
+                          className="w-full h-full object-cover grayscale-[15%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Disc3 className="w-12 h-12 text-[#333333]" />
+                        </div>
+                      )}
 
-                    <div className="absolute top-2.5 left-2.5">
-                      <span className="text-[10px] font-mono px-2 py-0.5 bg-[#0a0a0a]/90 border border-[#333333] text-[#f5f5f5] rounded">
-                        {item.condition_media || 'NM'} • {item.release_type || 'Оригинал'}
-                      </span>
-                    </div>
-
-                    {item.important_details?.includes('Цветной') && (
-                      <div className="absolute top-2.5 right-2.5">
-                        <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-900/90 text-purple-200 border border-purple-700 rounded">
-                          Цветной винил
+                      <div className="absolute top-2.5 left-2.5">
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-[#0a0a0a]/90 border border-[#333333] text-[#f5f5f5] rounded">
+                          {item.condition_media || 'NM-'} • {item.release_type || 'Оригинал'}
                         </span>
                       </div>
-                    )}
-                  </Link>
 
-                  <div className="p-4 space-y-1">
-                    <div className="flex items-center justify-between text-[11px] font-mono text-[#737373]">
-                      <span>
-                        {item.release.label ? `${item.release.label}` : 'Лейбл'}
-                        {item.release.year ? ` • ${item.release.year}` : ''}
-                      </span>
-                      <span>{item.release.country || 'Импорт'}</span>
+                      {item.important_details?.includes('Цветной') && (
+                        <div className="absolute top-2.5 right-2.5">
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-900/90 text-purple-200 border border-purple-700 rounded">
+                            Цветной винил
+                          </span>
+                        </div>
+                      )}
+                    </Link>
+
+                    <div className="p-4 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-[#737373]">
+                        <span>
+                          {item.release.label ? `${item.release.label}` : 'Лейбл'}
+                          {item.release.year ? ` • ${item.release.year}` : ''}
+                        </span>
+                        <span>{item.release.country || 'Импорт'}</span>
+                      </div>
+
+                      <h3 className="text-sm font-bold text-white uppercase group-hover:text-[#8b5cf6] transition-colors leading-snug truncate">
+                        {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'}
+                      </h3>
+                      <p className="text-xs text-[#a3a3a3] truncate">{item.release.title}</p>
                     </div>
-
-                    <h3 className="text-sm font-bold text-white uppercase group-hover:text-[#8b5cf6] transition-colors leading-snug truncate">
-                      {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'}
-                    </h3>
-                    <p className="text-xs text-[#a3a3a3] truncate">{item.release.title}</p>
                   </div>
-                </div>
 
-                <div className="p-4 pt-2 border-t border-[#1a1a1a] flex items-center justify-between">
-                  <span className="text-sm font-semibold font-mono text-white">
-                    {item.price > 0 ? `${item.price.toLocaleString('ru-RU')} ₽` : 'По запросу'}
-                  </span>
+                  <div className="p-4 pt-2 border-t border-[#1a1a1a] flex items-center justify-between">
+                    <span className="text-sm font-semibold font-mono text-white">
+                      {item.price > 0 ? `${item.price.toLocaleString('ru-RU')} ₽` : 'По запросу'}
+                    </span>
 
-                  <button
-                    onClick={() => {
-                      haptic.light();
-                      addToCart(item);
-                    }}
-                    disabled={inCart}
-                    className={`px-3.5 py-1.5 font-mono text-xs rounded-xl transition border ${
-                      inCart
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                        : 'bg-[#1a1a1a] hover:bg-white text-[#d4d4d4] hover:text-black border-[#2c2c2c] hover:border-white'
-                    }`}
-                  >
-                    {inCart ? 'В корзине' : 'В корзину'}
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                    <button
+                      onClick={() => {
+                        haptic.light();
+                        addToCart(item);
+                      }}
+                      disabled={inCart}
+                      className={`px-3.5 py-1.5 font-mono text-xs rounded-xl transition border ${
+                        inCart
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                          : 'bg-[#1a1a1a] hover:bg-white text-[#d4d4d4] hover:text-black border-[#2c2c2c] hover:border-white'
+                      }`}
+                    >
+                      {inCart ? 'В корзине' : 'В корзину'}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          {/* Кнопка "Загрузить еще" для бесконечного листания */}
+          {hasMore && (
+            <div className="pt-8 text-center font-mono">
+              <button
+                onClick={loadMoreCatalog}
+                disabled={loadingMore}
+                className="px-8 py-3.5 bg-[#141414] hover:bg-[#1f1f1f] text-white border border-[#262626] rounded-2xl text-xs font-bold transition inline-flex items-center gap-2 shadow-lg"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-[#8b5cf6]" />
+                    <span>Загрузка...</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-4 h-4 text-[#8b5cf6]" />
+                    <span>Показать еще 24 пластинки</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

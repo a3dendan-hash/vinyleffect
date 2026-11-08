@@ -17,7 +17,8 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
-  ShieldCheck,
+  Music,
+  ListMusic,
 } from 'lucide-react';
 import { supabase, ITEM_WITH_GRAPH_SELECT } from '../lib/supabase';
 import { VinylItem, mapSupabaseItem } from '../types/database';
@@ -56,18 +57,18 @@ export const RecordDetails: React.FC = () => {
       const currentItem = mapSupabaseItem(data);
       setItem(currentItem);
 
-      // Graph recommendations: other active items
-      const { data: allActiveData } = await supabase
+      // Рекомендации: загружаем только несколько похожих пластинок (быстрый запрос)
+      const primaryGenre = currentItem.release.genre[0];
+      const { data: similarData } = await supabase
         .from('items')
         .select(ITEM_WITH_GRAPH_SELECT)
         .eq('status', 'active')
         .neq('id', currentItem.id)
-        .limit(30);
+        .limit(12);
 
-      if (allActiveData) {
-        const allActive = allActiveData.map(mapSupabaseItem);
+      if (similarData) {
+        const allActive = similarData.map(mapSupabaseItem);
         const currentArtistIds = new Set((currentItem.release?.artists || []).map((a) => a.id));
-        const primaryGenre = currentItem.release?.genre?.[0];
 
         const byArtist = allActive.filter((other) =>
           (other.release?.artists || []).some((a) => currentArtistIds.has(a.id))
@@ -77,7 +78,7 @@ export const RecordDetails: React.FC = () => {
         if (primaryGenre) {
           const byGenre = allActive.filter(
             (other) =>
-              (other.release?.genre || []).includes(primaryGenre) &&
+              other.release.genre.includes(primaryGenre) &&
               !(other.release?.artists || []).some((a) => currentArtistIds.has(a.id))
           );
           setSimilarGenreItems(byGenre.slice(0, 6));
@@ -117,10 +118,11 @@ export const RecordDetails: React.FC = () => {
   const allPhotos = item.photos.length > 0 ? item.photos : [];
   const inCart = isInCart(item.id);
   const hasDiscogsUri = Boolean(item.release.discogs_uri);
+  const tracklist = item.release.tracklist || [];
 
   return (
     <div className="pb-28 space-y-6 max-w-4xl mx-auto">
-      {/* Кликабельная галерея реальных фотографий пластинки */}
+      {/* Кликабельная галерея реальных фотографий пластинки из Discogs */}
       <div className="space-y-3">
         <div
           onClick={() => {
@@ -135,6 +137,7 @@ export const RecordDetails: React.FC = () => {
             <img
               src={allPhotos[activePhotoIdx]}
               alt={item.release.title}
+              loading="lazy"
               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
             />
           ) : (
@@ -148,7 +151,7 @@ export const RecordDetails: React.FC = () => {
           {allPhotos.length > 0 && (
             <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-1.5 text-xs text-white">
               <Maximize2 className="w-3.5 h-3.5 text-[#8b5cf6]" />
-              <span className="font-mono text-[11px]">Нажмите для зума ({activePhotoIdx + 1}/{allPhotos.length})</span>
+              <span className="font-mono text-[11px]">Фото {activePhotoIdx + 1}/{allPhotos.length}</span>
             </div>
           )}
 
@@ -160,7 +163,7 @@ export const RecordDetails: React.FC = () => {
         </div>
 
         {allPhotos.length > 1 && (
-          <div className="flex justify-center gap-2 overflow-x-auto pb-1 max-w-md mx-auto">
+          <div className="flex justify-center gap-2 overflow-x-auto pb-1 max-w-md mx-auto scrollbar-none">
             {allPhotos.map((url, idx) => (
               <button
                 key={idx}
@@ -172,7 +175,7 @@ export const RecordDetails: React.FC = () => {
                   activePhotoIdx === idx ? 'border-[#8b5cf6] scale-105' : 'border-[#222222] opacity-60 hover:opacity-100'
                 }`}
               >
-                <img src={url} alt="" className="w-full h-full object-cover" />
+                <img src={url} alt="" loading="lazy" className="w-full h-full object-cover" />
               </button>
             ))}
           </div>
@@ -240,9 +243,8 @@ export const RecordDetails: React.FC = () => {
         </div>
       )}
 
-      {/* Основная карточка паспорта пластинки */}
+      {/* Основная карточка паспорта пластинки со всеми полями Discogs */}
       <div className="bg-[#111111] border border-[#222222] rounded-3xl p-6 sm:p-8 space-y-6 text-white shadow-2xl">
-        {/* Артист, Альбом, Год и Бейджи */}
         <div className="border-b border-[#222222] pb-5 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             {(item.release?.artists || []).map((artist) => (
@@ -257,12 +259,12 @@ export const RecordDetails: React.FC = () => {
             ))}
             {item.release.year && (
               <span className="text-xs font-mono text-[#888888] bg-[#1a1a1a] px-2.5 py-0.5 rounded-lg border border-[#2a2a2a]">
-                {item.release.year}
+                Год: {item.release.year}
               </span>
             )}
             {item.release.country && (
               <span className="text-xs font-mono text-[#888888] bg-[#1a1a1a] px-2.5 py-0.5 rounded-lg border border-[#2a2a2a]">
-                {item.release.country}
+                Страна: {item.release.country}
               </span>
             )}
           </div>
@@ -313,7 +315,7 @@ export const RecordDetails: React.FC = () => {
           <div className="space-y-1">
             <span className="text-[#737373] block text-[11px]">Формат</span>
             <span className="text-white font-semibold truncate block">
-              {item.release.format_details || '12" Vinyl'}
+              {item.release.format_details || '12" EP'}
             </span>
           </div>
         </div>
@@ -323,7 +325,7 @@ export const RecordDetails: React.FC = () => {
           <div className="bg-[#141414] border border-[#222222] rounded-2xl p-4 space-y-2">
             <h3 className="text-xs font-mono text-[#888888] uppercase tracking-wider flex items-center gap-1.5">
               <Info className="w-3.5 h-3.5 text-[#8b5cf6]" />
-              Дополнительная информация и матрицы
+              Дополнительная информация (Matrix / Runout / Каталожный номер)
             </h3>
             <div className="text-xs font-mono text-[#e5e5e5] whitespace-pre-line leading-relaxed">
               {item.extra_info || `Каталожный номер: ${item.release.catno}`}
@@ -358,6 +360,41 @@ export const RecordDetails: React.FC = () => {
           </div>
         )}
 
+        {/* ТРЕКЛИСТ РЕЛИЗА ИЗ DISCOGS */}
+        {tracklist.length > 0 && (
+          <div className="bg-[#141414] border border-[#222222] rounded-2xl p-4 sm:p-5 space-y-3 font-mono">
+            <div className="flex items-center justify-between border-b border-[#222222] pb-2.5">
+              <h3 className="text-xs text-white font-bold uppercase tracking-wider flex items-center gap-2">
+                <ListMusic className="w-4 h-4 text-[#8b5cf6]" />
+                <span>Треклист релиза</span>
+              </h3>
+              <span className="text-[11px] text-[#737373]">
+                {tracklist.length} треков
+              </span>
+            </div>
+
+            <div className="divide-y divide-[#1c1c1c] text-xs">
+              {tracklist.map((track, idx) => (
+                <div key={idx} className="py-2.5 flex items-center justify-between gap-3 hover:bg-[#181818] px-2 rounded-lg transition">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-[#8b5cf6] font-bold shrink-0 w-8 text-[11px]">
+                      {track.position || `${idx + 1}`}
+                    </span>
+                    <span className="text-white truncate font-medium">
+                      {track.title}
+                    </span>
+                  </div>
+                  {track.duration && (
+                    <span className="text-[#737373] text-[11px] shrink-0 font-mono">
+                      {track.duration}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Прямая ссылка на релиз в Discogs */}
         {hasDiscogsUri && (
           <div className="pt-2">
@@ -373,7 +410,7 @@ export const RecordDetails: React.FC = () => {
           </div>
         )}
 
-        {/* Контакты и самовывоз */}
+        {/* Контакты в СПб */}
         <div className="bg-[#0c0c0c] border border-[#1f1f1f] rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-white">
@@ -448,6 +485,7 @@ export const RecordDetails: React.FC = () => {
                       <img
                         src={cover}
                         alt=""
+                        loading="lazy"
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                       />
                     ) : (

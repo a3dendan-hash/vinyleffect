@@ -25,6 +25,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
   const [discogsUri, setDiscogsUri] = useState<string>(item.release.discogs_uri || '');
   const [description, setDescription] = useState<string>(item.description || '');
   const [photos, setPhotos] = useState<string[]>(item.photos || []);
+  const [tracklist, setTracklist] = useState<any[]>(item.release.tracklist || []);
   const [coverUrl, setCoverUrl] = useState<string>(item.release.default_cover_url || item.release.cover_url || '');
   const [imageUrlInput, setImageUrlInput] = useState('');
 
@@ -97,6 +98,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
       if (data.year) setYear(String(data.year));
       if (data.labels?.[0]?.name) setLabel(data.labels[0].name);
       if (data.uri) setDiscogsUri(data.uri);
+      if (Array.isArray(data.tracklist)) setTracklist(data.tracklist);
 
       if (data.formats) {
         const fmt = data.formats
@@ -162,6 +164,8 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
           discogs_uri: discogsUri.trim() || null,
           default_cover_url: coverUrl || photos[0] || null,
           cover_url: coverUrl || photos[0] || null,
+          discogs_photos: photos,
+          tracklist: tracklist,
         })
         .eq('id', item.release.id);
 
