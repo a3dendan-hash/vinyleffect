@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Camera, Trash2, Sparkles, Loader2, Check } from 'lucide-react';
+import { X, Camera, Trash2, Sparkles, Loader2, Check, Globe, Upload, Image as ImageIcon } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { VinylItem, MediaCondition, SleeveCondition, ItemStatus } from '../../types/database';
 import { haptic } from '../../lib/telegram';
@@ -19,8 +19,10 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
   const [conditionSleeve, setConditionSleeve] = useState<SleeveCondition>(item.condition_sleeve || 'VG+');
   const [description, setDescription] = useState<string>(item.description || '');
   const [photos, setPhotos] = useState<string[]>(item.photos || []);
+  const [coverUrl, setCoverUrl] = useState<string>(item.release.default_cover_url || '');
+  const [imageUrlInput, setImageUrlInput] = useState('');
 
-  // Метаданные релиза (жанры, стили, страна, дефолтная обложка)
+  // Метаданные релиза (жанры, стили, страна, год)
   const [genresInput, setGenresInput] = useState<string>(item.release.genre.join(', '));
   const [stylesInput, setStylesInput] = useState<string>(item.release.style.join(', '));
   const [country, setCountry] = useState<string>(item.release.country || '');
@@ -68,14 +70,19 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
     setPhotos((prev) => prev.filter((url) => url !== urlToRemove));
   };
 
-  // Опциональное обогащение жанров и стилей с публичного API Discogs по release_id
+  // Автоматическое получение обложки и метаданных с Discogs по release_id
   const enrichFromDiscogs = async () => {
     const discogsId = item.release.discogs_release_id;
-    if (!discogsId) return;
+    if (!discogsId) {
+      alert('У этой пластинки нет ID релиза Discogs');
+      return;
+    }
 
     setFetchingDiscogs(true);
     try {
-      const res = await fetch(`https://api.discogs.com/releases/${discogsId}`);
+      const res = await fetch(`https://api.discogs.com/releases/${discogsId}`, {
+        headers: { 'User-Agent': 'VinylEffectApp/1.0' },
+      });
       if (!res.ok) throw new Error('Не удалось получить данные от Discogs API');
       const data = await res.json();
 
@@ -83,6 +90,12 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
       if (Array.isArray(data.styles)) setStylesInput(data.styles.join(', '));
       if (data.country) setCountry(data.country);
       if (data.year) setYear(String(data.year));
+      
+      const primaryImage = data?.images?.[0]?.uri || data?.thumb;
+      if (primaryImage && !coverUrl) {
+        setCoverUrl(primaryImage);
+      }
+
       haptic.success();
     } catch (err: any) {
       alert(err.message);
@@ -91,27 +104,31 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
     }
   };
 
+  const handleAddByUrl = () => {
+    const trimmed = imageUrlInput.trim();
+    if (!trimmed) return;
+    if (!coverUrl) {
+      setCoverUrl(trimmed);
+    } else {
+      setPhotos((prev) => [...prev, trimmed]);
+    }
+    setImageUrlInput('');
+  };
+
   const handleSave = async (targetStatus: ItemStatus) => {
     const numericPrice = parseFloat(price);
     if (targetStatus === 'active' && (isNaN(numericPrice) || numericPrice <= 0)) {
       haptic.error();
-      alert('Укажите корректную цену перед публикацией пластинки.');
+      alert('Укажите корректную цену перед публикацией пластинки на витрину.');
       return;
     }
 
     setSaving(true);
     try {
-      const genres = genresInput
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const styles = stylesInput
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const genres = genresInput.split(',').map((s) => s.trim()).filter(Boolean);
+      const styles = stylesInput.split(',').map((s) => s.trim()).filter(Boolean);
 
-      // 1. Обновляем метаданные релиза (включая дефолтную обложку, если её не было)
-      const defaultCover = item.release.default_cover_url || photos[0] || null;
+      // 1. Обновляем метаданные релиза (обложка, жанры, год)
       const { error: relErr } = await supabase
         .from('releases')
         .update({
@@ -119,7 +136,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
           style: styles,
           country: country.trim() || null,
           year: year ? parseInt(year, 10) : null,
-          default_cover_url: defaultCover,
+          default_cover_url: coverUrl || photos[0] || null,
         })
         .eq('id', item.release.id);
 
@@ -174,42 +191,79 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
 
         {/* Тело формы */}
         <div className="p-5 overflow-y-auto space-y-5 text-sm">
-          {/* Живые фотографии */}
-          <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-2">
-              Живые фото экземпляра (Supabase Storage: vinyl-photos)
-            </label>
-            <div className="flex gap-2.5 overflow-x-auto pb-2">
-              {photos.map((url, idx) => (
-                <div
-                  key={idx}
-                  className="relative w-24 h-24 rounded-xl overflow-hidden border border-zinc-700 shrink-0 group"
+          {/* Управление обложкой и фото */}
+          <div className="space-y-3 bg-zinc-950 p-3.5 rounded-2xl border border-zinc-800">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                <ImageIcon className="w-4 h-4 text-amber-500" />
+                Обложка и фотографии
+              </span>
+
+              {item.release.discogs_release_id && (
+                <button
+                  type="button"
+                  onClick={enrichFromDiscogs}
+                  disabled={fetchingDiscogs}
+                  className="text-xs bg-zinc-800 hover:bg-zinc-700 text-amber-400 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition"
                 >
-                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  {fetchingDiscogs ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+                  <span>Заполнить из Discogs</span>
+                </button>
+              )}
+            </div>
+
+            {/* Превью */}
+            <div className="flex gap-2 overflow-x-auto py-1">
+              {coverUrl && (
+                <div className="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-amber-500 shrink-0">
+                  <img src={coverUrl} alt="Обложка" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setCoverUrl('')}
+                    className="absolute top-1 right-1 bg-black/70 text-red-400 p-1 rounded"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              {photos.map((url, idx) => (
+                <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-zinc-700 shrink-0">
+                  <img src={url} alt="Фото" className="w-full h-full object-cover" />
                   <button
                     type="button"
                     onClick={() => removePhoto(url)}
-                    className="absolute top-1 right-1 bg-black/70 text-red-400 p-1 rounded-lg"
+                    className="absolute top-1 right-1 bg-black/70 text-red-400 p-1 rounded"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-3 h-3" />
                   </button>
                 </div>
               ))}
+            </div>
 
-              <label className="w-24 h-24 rounded-xl border-2 border-dashed border-zinc-700 hover:border-amber-500 flex flex-col items-center justify-center cursor-pointer shrink-0 text-zinc-400 hover:text-amber-500 transition">
-                {uploading ? (
-                  <Loader2 className="w-6 h-6 animate-spin" />
-                ) : (
-                  <>
-                    <Camera className="w-6 h-6 mb-1" />
-                    <span className="text-[10px] font-medium">Добавить</span>
-                  </>
-                )}
+            {/* Добавление по ссылке или файлом */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={imageUrlInput}
+                onChange={(e) => setImageUrlInput(e.target.value)}
+                placeholder="Ссылка на фото..."
+                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
+              />
+              <button
+                type="button"
+                onClick={handleAddByUrl}
+                className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs px-3 py-2 rounded-xl shrink-0"
+              >
+                По ссылке
+              </button>
+              <label className="cursor-pointer bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 relative overflow-hidden shrink-0">
+                {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                <span>Свое фото</span>
                 <input
                   type="file"
                   accept="image/*"
                   multiple
-                  className="hidden"
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                   disabled={uploading}
                   onChange={handlePhotoUpload}
                 />
@@ -229,7 +283,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
             />
           </div>
 
-          {/* Состояние винила (Media Condition) */}
+          {/* Состояние винила */}
           <div>
             <label className="block text-xs font-medium text-zinc-400 mb-1.5">
               Состояние пластинки (Media — Goldmine)
@@ -255,7 +309,7 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
             </div>
           </div>
 
-          {/* Состояние конверта (Sleeve Condition) */}
+          {/* Состояние конверта */}
           <div>
             <label className="block text-xs font-medium text-zinc-400 mb-1.5">
               Состояние конверта (Sleeve — Goldmine)
@@ -281,25 +335,10 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
             </div>
           </div>
 
-          {/* Метаданные релиза для графа связей */}
+          {/* Метаданные релиза */}
           <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-3.5 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-300">Метаданные графа связей</span>
-              {item.release.discogs_release_id && (
-                <button
-                  type="button"
-                  onClick={enrichFromDiscogs}
-                  disabled={fetchingDiscogs}
-                  className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-400 hover:text-amber-300"
-                >
-                  {fetchingDiscogs ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
-                  )}
-                  <span>Заполнить из Discogs (#{item.release.discogs_release_id})</span>
-                </button>
-              )}
+              <span className="text-xs font-semibold text-zinc-300">Метаданные релиза</span>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
@@ -307,30 +346,30 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
                 <label className="block text-[11px] text-zinc-400 mb-1">Жанры (через запятую)</label>
                 <input
                   type="text"
-                  placeholder="Rock, Jazz, Electronic"
+                  placeholder="Rock, Jazz"
                   value={genresInput}
                   onChange={(e) => setGenresInput(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-zinc-400 mb-1">Стили (через запятую)</label>
                 <input
                   type="text"
-                  placeholder="Psychedelic Rock, Krautrock"
+                  placeholder="Psychedelic Rock"
                   value={stylesInput}
                   onChange={(e) => setStylesInput(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-zinc-400 mb-1">Страна издания</label>
+                <label className="block text-[11px] text-zinc-400 mb-1">Страна</label>
                 <input
                   type="text"
                   placeholder="UK / US / Japan"
                   value={country}
                   onChange={(e) => setCountry(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
               <div>
@@ -340,20 +379,20 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
                   placeholder="1975"
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
             </div>
           </div>
 
-          {/* Описание особенностей экземпляра */}
+          {/* Описание */}
           <div>
             <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-              Описание особенностей / матрицы / комплектации (OBI, вкладки)
+              Описание особенностей / матрицы / комплектации
             </label>
             <textarea
               rows={3}
-              placeholder="Первый британский пресс, в комплекте оригинальный внутренний конверт и постер..."
+              placeholder="Первый британский пресс..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white text-xs focus:border-amber-500 focus:outline-none"
@@ -367,18 +406,18 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
             type="button"
             disabled={saving}
             onClick={() => handleSave('draft')}
-            className="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-300 font-semibold text-xs hover:bg-zinc-800 transition"
+            className="flex-1 py-3 rounded-2xl border border-zinc-700 text-zinc-300 font-semibold text-xs hover:bg-zinc-800 transition"
           >
-            Сохранить черновик
+            В черновики
           </button>
           <button
             type="button"
             disabled={saving}
             onClick={() => handleSave('active')}
-            className="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs flex items-center justify-center gap-1.5 transition"
+            className="flex-1 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs flex items-center justify-center gap-1.5 transition"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            <span>Опубликовать</span>
+            <span>На витрину</span>
           </button>
         </div>
       </div>
