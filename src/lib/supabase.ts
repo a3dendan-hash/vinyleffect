@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getTelegramUser } from './telegram';
 
 const rawUrl = 'https://miqxmalujcxozgoqpskv.supabase.co';
-const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+const rawKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '').trim();
 
 export const supabase = createClient(rawUrl, rawKey, {
   global: {

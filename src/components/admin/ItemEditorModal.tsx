@@ -4,8 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { VinylItem, MediaCondition, SleeveCondition, ItemStatus } from '../../types/database';
 import { haptic } from '../../lib/telegram';
 
-const MEDIA_GRADES: MediaCondition[] = ['M', 'NM', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P'];
-const SLEEVE_GRADES: SleeveCondition[] = ['M', 'NM', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P', 'Generic'];
+const MEDIA_GRADES: MediaCondition[] = ['M', 'NM', 'NM-', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P'];
+const SLEEVE_GRADES: SleeveCondition[] = ['M', 'NM', 'NM-', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P', 'Generic'];
 
 interface Props {
   item: VinylItem;

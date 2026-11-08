@@ -30,7 +30,7 @@ export const isAdminUser = (): boolean => {
     return true;
   }
 
-  const rawAdmins = import.meta.env.VITE_ADMIN_TELEGRAM_ID || '194615771,8584180753';
+  const rawAdmins = (import.meta as any).env?.VITE_ADMIN_TELEGRAM_ID || '194615771,8584180753';
   const adminIds = String(rawAdmins)
     .split(',')
     .map((id) => id.trim())

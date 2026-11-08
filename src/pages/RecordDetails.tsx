@@ -272,7 +272,7 @@ export const RecordDetails: React.FC = () => {
           </h1>
 
           {/* Важные детали (Limited edition, Numbered, Цветной винил) */}
-          {(item.importantDetailsParts || item.important_details) && (
+          {Boolean(item.important_details) && (
             <div className="flex flex-wrap gap-2 pt-1">
               {item.important_details?.split(',').map((detail, idx) => (
                 <span

@@ -1,4 +1,4 @@
-export type MediaCondition = 'M' | 'NM' | 'EX' | 'VG+' | 'VG' | 'G+' | 'G' | 'F' | 'P';
+export type MediaCondition = 'M' | 'NM' | 'NM-' | 'EX' | 'VG+' | 'VG' | 'G+' | 'G' | 'F' | 'P';
 export type SleeveCondition = MediaCondition | 'Generic';
 export type ItemStatus = 'draft' | 'active' | 'reserved' | 'sold';
 
@@ -52,7 +52,6 @@ export interface VinylItem {
   release: Release;
 }
 
-// Вспомогательная функция трансформации ответа PostgREST в плоский объект
 export function mapSupabaseItem(raw: any): VinylItem {
   const releaseRaw = raw.release || raw.releases || {};
   const artists: Artist[] = (releaseRaw.release_artists || [])
@@ -71,8 +70,8 @@ export function mapSupabaseItem(raw: any): VinylItem {
     id: raw.id,
     release_id: raw.release_id,
     price: Number(raw.price || 0),
-    condition_media: raw.condition_media || 'NM-',
-    condition_sleeve: raw.condition_sleeve || 'NM',
+    condition_media: (raw.condition_media as MediaCondition) || 'NM-',
+    condition_sleeve: (raw.condition_sleeve as SleeveCondition) || 'NM',
     description: raw.description || '',
     photos: combinedPhotos,
     custom_images: rawCustomImages,
