@@ -5,32 +5,28 @@ import {
   Disc3,
   Loader2,
   Search,
-  SlidersHorizontal,
   X,
   ExternalLink,
   Send,
   Eye,
   Trash2,
-  Tag,
-  Sparkles,
   ChevronDown,
+  Sparkles,
 } from 'lucide-react';
-import { supabase, ITEM_WITH_GRAPH_SELECT } from '../lib/supabase';
+import { supabase, ITEM_CATALOG_SELECT } from '../lib/supabase';
 import { VinylItem, ItemStatus, mapSupabaseItem } from '../types/database';
 import { DiscogsImporter } from '../components/admin/DiscogsImporter';
 import { ItemEditorModal } from '../components/admin/ItemEditorModal';
 import { haptic } from '../lib/telegram';
 
-const PAGE_SIZE = 24;
+const CLIENT_ADMIN_BATCH = 50;
 
 export const AdminDashboard: React.FC = () => {
   const [items, setItems] = useState<VinylItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
   const [statusFilter, setStatusFilter] = useState<ItemStatus>('draft');
   const [editingItem, setEditingItem] = useState<VinylItem | null>(null);
+  const [displayCount, setDisplayCount] = useState(CLIENT_ADMIN_BATCH);
 
   const [counts, setCounts] = useState<{ draft: number; active: number; sold: number }>({
     draft: 0,
@@ -61,52 +57,42 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const fetchAdminItems = async (pageToLoad = 0, reset = false) => {
-    if (reset) {
-      setLoading(true);
-      setPage(0);
-    } else {
-      setLoadingMore(true);
-    }
-
-    const from = pageToLoad * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-
+  // Загружаем сразу ВСЕ пластинки выбранного статуса (параллельные запросы по 1000)
+  // Это избавляет от постраничной загрузки по 24 штуки и дает мгновенный поиск по всем черновикам
+  const fetchAllAdminItems = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('items')
-        .select(ITEM_WITH_GRAPH_SELECT)
-        .eq('status', statusFilter)
-        .range(from, to)
-        .order('created_at', { ascending: false });
+      const ranges = ['0-999', '1000-1999', '2000-2999', '3000-3999'];
+      const chunkPromises = ranges.map(async (r) => {
+        const [from, to] = r.split('-').map(Number);
+        const { data, error } = await supabase
+          .from('items')
+          .select(ITEM_CATALOG_SELECT)
+          .eq('status', statusFilter)
+          .range(from, to)
+          .order('created_at', { ascending: false });
 
-      if (!error && data) {
-        const mapped = data.map(mapSupabaseItem);
-        if (reset) {
-          setItems(mapped);
-        } else {
-          setItems((prev) => [...prev, ...mapped]);
+        if (error) {
+          console.warn(`Error loading admin chunk ${r}:`, error);
+          return [];
         }
-        setHasMore(mapped.length === PAGE_SIZE);
-        setPage(pageToLoad);
-      }
+        return data || [];
+      });
+
+      const chunks = await Promise.all(chunkPromises);
+      const combined = chunks.flat();
+      const mapped = combined.map(mapSupabaseItem);
+      setItems(mapped);
+      setDisplayCount(CLIENT_ADMIN_BATCH);
     } finally {
       setLoading(false);
-      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
     fetchCounts();
-    fetchAdminItems(0, true);
+    fetchAllAdminItems();
   }, [statusFilter]);
-
-  const loadMoreItems = () => {
-    if (!loadingMore && hasMore) {
-      haptic.light();
-      fetchAdminItems(page + 1, false);
-    }
-  };
 
   const handleQuickStatusChange = async (itemId: string, newStatus: ItemStatus) => {
     haptic.selection();
@@ -150,7 +136,11 @@ export const AdminDashboard: React.FC = () => {
         const artistMatch = (item.release?.artists || []).some((a) => a.name.toLowerCase().includes(q));
         const labelMatch = (item.release?.label || '').toLowerCase().includes(q);
         const catnoMatch = (item.release?.catno || '').toLowerCase().includes(q);
-        if (!titleMatch && !artistMatch && !labelMatch && !catnoMatch) return false;
+        const countryMatch = (item.release?.country || '').toLowerCase().includes(q);
+        const discogsIdMatch = (item.release?.discogs_release_id || '').includes(q);
+        if (!titleMatch && !artistMatch && !labelMatch && !catnoMatch && !countryMatch && !discogsIdMatch) {
+          return false;
+        }
       }
 
       if (conditionFilter && item.condition_media !== conditionFilter) return false;
@@ -168,13 +158,23 @@ export const AdminDashboard: React.FC = () => {
     });
   }, [items, query, conditionFilter, priceFilter, sortBy]);
 
+  // Срез для мгновенного плавного рендера DOM
+  const displayedSlice = useMemo(() => {
+    return filtered.slice(0, displayCount);
+  }, [filtered, displayCount]);
+
+  const loadMoreAdminSlice = () => {
+    haptic.light();
+    setDisplayCount((prev) => Math.min(prev + CLIENT_ADMIN_BATCH, filtered.length));
+  };
+
   return (
     <div className="pb-24 max-w-7xl mx-auto">
-      {/* Модуль загрузки Wantlist CSV из Discogs с автообогащением */}
+      {/* Модуль загрузки Wantlist CSV из Discogs */}
       <DiscogsImporter
         onImportComplete={() => {
           fetchCounts();
-          fetchAdminItems(0, true);
+          fetchAllAdminItems();
         }}
       />
 
@@ -209,7 +209,7 @@ export const AdminDashboard: React.FC = () => {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Поиск по артисту, названию, каталожному номеру..."
+              placeholder={`Поиск по всем ${items.length} ${statusFilter === 'draft' ? 'черновикам' : 'пластинкам'}...`}
               className="w-full bg-[#171717] border border-[#2a2a2a] rounded-xl pl-10 pr-9 py-2 text-white placeholder-[#666666] focus:border-[#8b5cf6] focus:outline-none"
             />
             {query && (
@@ -258,27 +258,34 @@ export const AdminDashboard: React.FC = () => {
             </select>
           </div>
         </div>
+
+        <div className="text-[11px] text-[#737373] flex items-center justify-between">
+          <span>
+            Показано {displayedSlice.length} из {filtered.length} (всего в этой вкладке: {items.length})
+          </span>
+          <span className="text-[#8b5cf6]">Кликните на любую карточку для открытия редактора</span>
+        </div>
       </div>
 
-      {/* Список пластинок текущей вкладки (Кликабельные карточки для админа) */}
+      {/* Список пластинок текущей вкладки (КЛИКАБЕЛЬНЫЕ КАРТОЧКИ В ЧЕРНОВИКАХ) */}
       {loading ? (
         <div className="py-24 text-center space-y-3">
           <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin mx-auto" />
-          <p className="text-xs font-mono text-[#888888]">Загрузка базы данных...</p>
+          <p className="text-xs font-mono text-[#888888]">Загрузка базы пластинок...</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="py-20 text-center space-y-2 bg-[#111111] border border-[#222222] rounded-3xl p-8 font-mono">
           <Disc3 className="w-10 h-10 text-[#444444] mx-auto" />
-          <h4 className="text-white text-sm font-bold">В этой вкладке ничего нет</h4>
+          <h4 className="text-white text-sm font-bold">Ничего не найдено</h4>
           <p className="text-xs text-[#737373]">
             {statusFilter === 'draft'
-              ? 'Загрузите wantlist.csv чтобы наполнить черновики.'
+              ? 'Черновики пусты или не соответствуют фильтру поиска.'
               : 'Перенесите пластинки из черновиков на витрину.'}
           </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((item) => {
+          {displayedSlice.map((item) => {
             const cover = item.photos[0] || item.release.default_cover_url;
 
             return (
@@ -288,7 +295,7 @@ export const AdminDashboard: React.FC = () => {
                   haptic.light();
                   setEditingItem(item);
                 }}
-                className="bg-[#111111] border border-[#222222] hover:border-[#8b5cf6]/60 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition shadow-md cursor-pointer group"
+                className="bg-[#111111] border border-[#222222] hover:border-[#8b5cf6] rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition shadow-md cursor-pointer group hover:bg-[#161616]"
               >
                 {/* Превью и метаданные */}
                 <div className="flex items-center gap-3.5 min-w-0 flex-1">
@@ -318,6 +325,12 @@ export const AdminDashboard: React.FC = () => {
                           {item.release_type}
                         </span>
                       )}
+                      {item.important_details?.includes('Цветной') && (
+                        <span className="text-[9px] font-mono bg-purple-950/70 border border-purple-800/60 text-[#c084fc] px-1.5 py-0.2 rounded flex items-center gap-1">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          Цветной
+                        </span>
+                      )}
                     </div>
 
                     <h4 className="text-sm font-bold text-white truncate group-hover:text-[#8b5cf6] transition">
@@ -343,15 +356,15 @@ export const AdminDashboard: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-3 pt-0.5" onClick={(e) => e.stopPropagation()}>
-                      {item.release.discogs_uri && (
+                      {item.release.discogs_release_id && (
                         <a
-                          href={item.release.discogs_uri}
+                          href={item.release.discogs_uri || `https://www.discogs.com/release/${item.release.discogs_release_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-[10px] font-mono text-[#8b5cf6] hover:underline"
                         >
                           <ExternalLink className="w-3 h-3" />
-                          <span>Discogs #{item.release.discogs_release_id || 'ID'}</span>
+                          <span>Discogs #{item.release.discogs_release_id}</span>
                         </a>
                       )}
 
@@ -431,25 +444,17 @@ export const AdminDashboard: React.FC = () => {
             );
           })}
 
-          {/* Кнопка подгрузки следующих порций черновиков */}
-          {hasMore && (
+          {/* Кнопка подгрузки следующей порции из памяти */}
+          {displayedSlice.length < filtered.length && (
             <div className="pt-4 text-center">
               <button
-                onClick={loadMoreItems}
-                disabled={loadingMore}
+                onClick={loadMoreAdminSlice}
                 className="px-6 py-3 bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] rounded-xl font-mono text-xs text-[#a3a3a3] hover:text-white transition inline-flex items-center gap-2"
               >
-                {loadingMore ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-[#8b5cf6]" />
-                    <span>Загрузка...</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-4 h-4 text-[#8b5cf6]" />
-                    <span>Показать еще 24 пластинки</span>
-                  </>
-                )}
+                <ChevronDown className="w-4 h-4 text-[#8b5cf6]" />
+                <span>
+                  Показать еще {Math.min(CLIENT_ADMIN_BATCH, filtered.length - displayedSlice.length)} (показано {displayedSlice.length} из {filtered.length})
+                </span>
               </button>
             </div>
           )}
@@ -465,7 +470,7 @@ export const AdminDashboard: React.FC = () => {
           onSaved={() => {
             setEditingItem(null);
             fetchCounts();
-            fetchAdminItems(0, true);
+            fetchAllAdminItems();
           }}
         />
       )}

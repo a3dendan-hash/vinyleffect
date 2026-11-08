@@ -43,7 +43,7 @@ export const InfoModal: React.FC<Props> = ({ isOpen, onClose }) => {
         <div className="bg-[#0c0c0c] border border-[#1f1f1f] rounded-2xl p-4 space-y-2.5 font-mono text-xs">
           <div className="flex items-center gap-2.5 text-white">
             <MapPin className="w-4 h-4 text-[#8b5cf6] shrink-0" />
-            <span>г. Санкт-Петербург, шоурум ул. Рубинштейна</span>
+            <span>г. Санкт-Петербург, магазин ул. Рубинштейна</span>
           </div>
           <div className="flex items-center gap-2.5">
             <Phone className="w-4 h-4 text-[#8b5cf6] shrink-0" />

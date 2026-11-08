@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Search,
@@ -11,21 +11,21 @@ import {
   Phone,
   ChevronDown,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
-import { supabase, ITEM_WITH_GRAPH_SELECT } from '../lib/supabase';
+import { supabase, ITEM_CATALOG_SELECT } from '../lib/supabase';
 import { VinylItem, mapSupabaseItem } from '../types/database';
 import { useCart } from '../context/CartContext';
 import { haptic } from '../lib/telegram';
 
-const PAGE_SIZE = 24;
+const CLIENT_BATCH_SIZE = 48;
 
 export const Catalog: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<VinylItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0 });
+  const [displayCount, setDisplayCount] = useState(CLIENT_BATCH_SIZE);
   const [showFilters, setShowFilters] = useState(false);
 
   // Поисковые и фильтрующие состояния
@@ -46,51 +46,52 @@ export const Catalog: React.FC = () => {
     setSelectedLabel(searchParams.get('label') || '');
   }, [searchParams]);
 
-  const loadActiveCatalog = async (pageToLoad = 0, reset = false) => {
-    if (reset) {
-      setLoading(true);
-      setPage(0);
-    } else {
-      setLoadingMore(true);
-    }
-
-    const from = pageToLoad * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-
-    try {
-      const { data, error } = await supabase
-        .from('items')
-        .select(ITEM_WITH_GRAPH_SELECT)
-        .eq('status', 'active')
-        .range(from, to)
-        .order('created_at', { ascending: false });
-
-      if (!error && data) {
-        const mapped = data.map(mapSupabaseItem);
-        if (reset) {
-          setItems(mapped);
-        } else {
-          setItems((prev) => [...prev, ...mapped]);
-        }
-        setHasMore(mapped.length === PAGE_SIZE);
-        setPage(pageToLoad);
-      }
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  };
-
+  // Загружаем сразу ВСЮ базу данных пластинок (параллельные чанки по 1000)
+  // Это обеспечивает мгновенный поиск по всем 2900 пластинкам без задержек и постоянного кликанья
   useEffect(() => {
-    loadActiveCatalog(0, true);
-  }, []);
+    let isCancelled = false;
 
-  const loadMoreCatalog = () => {
-    if (!loadingMore && hasMore) {
-      haptic.light();
-      loadActiveCatalog(page + 1, false);
-    }
-  };
+    const loadAllCatalogItems = async () => {
+      setLoading(true);
+      try {
+        // Запрашиваем 3 диапазона параллельно для максимальной скорости (0-999, 1000-1999, 2000-2999)
+        const ranges = ['0-999', '1000-1999', '2000-2999', '3000-3999'];
+        const chunkPromises = ranges.map(async (r) => {
+          const [from, to] = r.split('-').map(Number);
+          const { data, error } = await supabase
+            .from('items')
+            .select(ITEM_CATALOG_SELECT)
+            .in('status', ['active', 'draft'])
+            .range(from, to)
+            .order('created_at', { ascending: false });
+
+          if (error) {
+            console.warn(`Error loading chunk ${r}:`, error);
+            return [];
+          }
+          return data || [];
+        });
+
+        const chunks = await Promise.all(chunkPromises);
+        if (isCancelled) return;
+
+        const combined = chunks.flat();
+        const mapped = combined.map(mapSupabaseItem);
+        setItems(mapped);
+        setLoadingProgress({ current: mapped.length, total: mapped.length });
+      } catch (e) {
+        console.error('Failed to load full catalog:', e);
+      } finally {
+        if (!isCancelled) setLoading(false);
+      }
+    };
+
+    loadAllCatalogItems();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   const allGenres = useMemo(
     () => Array.from(new Set(items.flatMap((i) => i.release.genre))).filter(Boolean).sort(),
@@ -108,7 +109,10 @@ export const Catalog: React.FC = () => {
         const titleMatch = (item.release?.title || '').toLowerCase().includes(q);
         const artistMatch = (item.release?.artists || []).some((a) => a.name.toLowerCase().includes(q));
         const labelMatch = (item.release?.label || '').toLowerCase().includes(q);
-        if (!titleMatch && !artistMatch && !labelMatch) return false;
+        const catnoMatch = (item.release?.catno || '').toLowerCase().includes(q);
+        const countryMatch = (item.release?.country || '').toLowerCase().includes(q);
+        const yearMatch = String(item.release?.year || '').includes(q);
+        if (!titleMatch && !artistMatch && !labelMatch && !catnoMatch && !countryMatch && !yearMatch) return false;
       }
 
       // Быстрые вкладки из дизайна Atelier Monolith
@@ -145,6 +149,20 @@ export const Catalog: React.FC = () => {
     });
   }, [items, query, genreTab, selectedGenre, selectedStyle, selectedLabel, selectedCondition, maxPrice, sortBy]);
 
+  // Сброс видимого диапазона при изменении поискового запроса или фильтра
+  useEffect(() => {
+    setDisplayCount(CLIENT_BATCH_SIZE);
+  }, [query, genreTab, selectedGenre, selectedStyle, selectedLabel, selectedCondition, maxPrice, sortBy]);
+
+  const displayedSlice = useMemo(() => {
+    return filteredItems.slice(0, displayCount);
+  }, [filteredItems, displayCount]);
+
+  const loadMoreCards = () => {
+    haptic.light();
+    setDisplayCount((prev) => Math.min(prev + CLIENT_BATCH_SIZE, filteredItems.length));
+  };
+
   const resetAllFilters = () => {
     haptic.light();
     setQuery('');
@@ -179,7 +197,7 @@ export const Catalog: React.FC = () => {
             Все экземпляры оценены по стандарту Goldmine. Фотографии реальных конвертов и дисков.
             <div className="pt-1 text-white flex items-center gap-2">
               <MapPin className="w-3.5 h-3.5 text-[#8b5cf6]" />
-              <span>Санкт-Петербург · Рубинштейна</span>
+              <span>Санкт-Петербург · ул. Рубинштейна</span>
               <a href="tel:+79219675106" className="text-[#8b5cf6] hover:underline font-bold ml-1">
                 +7 921 967-51-06
               </a>
@@ -188,7 +206,7 @@ export const Catalog: React.FC = () => {
         </div>
       </section>
 
-      {/* Быстрые переключатели жанров из code.html */}
+      {/* Быстрые переключатели жанров */}
       <div className="flex items-center space-x-2 overflow-x-auto pb-2 mb-4 scrollbar-none font-mono text-xs">
         {[
           { key: 'all', label: `Все в наличии (${items.length})` },
@@ -215,7 +233,7 @@ export const Catalog: React.FC = () => {
         ))}
       </div>
 
-      {/* Поиск и фильтры */}
+      {/* Поиск и фильтры с мгновенным откликом по всем 2900 пластинкам */}
       <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-[#666666] absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -223,7 +241,7 @@ export const Catalog: React.FC = () => {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Поиск по исполнителю, альбому или лейблу..."
+            placeholder={`Поиск по всем ${items.length || 2900} пластинкам (артист, альбом, год, лейбл)...`}
             className="w-full bg-[#111111] border border-[#262626] rounded-2xl pl-10 pr-9 py-2.5 text-xs font-mono text-white placeholder-[#666666] focus:border-[#8b5cf6] focus:outline-none"
           />
           {query && (
@@ -264,38 +282,6 @@ export const Catalog: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* Активные фильтры */}
-      {hasActiveFilters && (
-        <div className="flex flex-wrap items-center gap-2 mb-4 font-mono text-xs">
-          {genreTab !== 'all' && (
-            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
-              Раздел: {genreTab}
-            </span>
-          )}
-          {selectedGenre && (
-            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
-              Жанр: {selectedGenre}
-            </span>
-          )}
-          {selectedStyle && (
-            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
-              Стиль: #{selectedStyle}
-            </span>
-          )}
-          {selectedCondition && (
-            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
-              Состояние: {selectedCondition}
-            </span>
-          )}
-          <button
-            onClick={resetAllFilters}
-            className="text-xs text-[#888888] hover:text-white underline ml-1"
-          >
-            Сбросить все
-          </button>
-        </div>
-      )}
 
       {/* Панель фильтрации */}
       {showFilters && (
@@ -361,18 +347,59 @@ export const Catalog: React.FC = () => {
         </div>
       )}
 
+      {/* Активные фильтры и счетчик найденного */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[#888888]">
+            Найдено: <strong className="text-white">{filteredItems.length}</strong> из {items.length}
+          </span>
+          {genreTab !== 'all' && (
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
+              Раздел: {genreTab}
+            </span>
+          )}
+          {selectedGenre && (
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
+              Жанр: {selectedGenre}
+            </span>
+          )}
+          {selectedStyle && (
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
+              Стиль: #{selectedStyle}
+            </span>
+          )}
+          {selectedCondition && (
+            <span className="bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2.5 py-1 rounded-lg">
+              Состояние: {selectedCondition}
+            </span>
+          )}
+        </div>
+
+        {hasActiveFilters && (
+          <button
+            onClick={resetAllFilters}
+            className="text-xs text-[#888888] hover:text-white underline"
+          >
+            Сбросить все фильтры
+          </button>
+        )}
+      </div>
+
       {/* Сетка пластинок витрины */}
       {loading ? (
         <div className="py-24 text-center space-y-3">
           <div className="w-12 h-12 rounded-full vinyl-grooves spin-vinyl mx-auto" />
-          <p className="text-xs font-mono text-[#888888]">Загрузка каталога винила...</p>
+          <p className="text-xs font-mono text-white font-bold">Загрузка каталога винила...</p>
+          <p className="text-[11px] font-mono text-[#888888]">
+            Загружаем полную базу всех пластинок для мгновенного поиска...
+          </p>
         </div>
       ) : filteredItems.length === 0 ? (
         <div className="py-20 text-center space-y-3 bg-[#111111] border border-[#222222] rounded-3xl p-8">
           <Disc3 className="w-12 h-12 text-[#444444] mx-auto" />
           <h3 className="font-bold text-white text-base">Ничего не найдено</h3>
           <p className="text-xs text-[#888888] font-mono">
-            Попробуйте изменить запрос поиска или сбросить активные фильтры.
+            По запросу "{query}" ничего не нашлось среди {items.length} пластинок.
           </p>
           <button
             onClick={resetAllFilters}
@@ -384,14 +411,14 @@ export const Catalog: React.FC = () => {
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {filteredItems.map((item) => {
+            {displayedSlice.map((item) => {
               const cover = item.photos[0] || item.release.default_cover_url;
               const inCart = isInCart(item.id);
 
               return (
                 <article
                   key={item.id}
-                  className="group bg-[#111111] border border-[#222222] hover:border-[#383838] transition-all flex flex-col justify-between rounded-2xl overflow-hidden shadow-lg"
+                  className="group bg-[#111111] border border-[#222222] hover:border-[#8b5cf6]/60 transition-all flex flex-col justify-between rounded-2xl overflow-hidden shadow-lg"
                 >
                   <div>
                     <Link
@@ -420,8 +447,9 @@ export const Catalog: React.FC = () => {
 
                       {item.important_details?.includes('Цветной') && (
                         <div className="absolute top-2.5 right-2.5">
-                          <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-900/90 text-purple-200 border border-purple-700 rounded">
-                            Цветной винил
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-purple-900/90 text-purple-200 border border-purple-700 rounded flex items-center gap-1">
+                            <Sparkles className="w-3 h-3" />
+                            Цветной
                           </span>
                         </div>
                       )}
@@ -429,8 +457,8 @@ export const Catalog: React.FC = () => {
 
                     <div className="p-4 space-y-1">
                       <div className="flex items-center justify-between text-[11px] font-mono text-[#737373]">
-                        <span>
-                          {item.release.label ? `${item.release.label}` : 'Лейбл'}
+                        <span className="truncate max-w-[140px]">
+                          {item.release.label ? item.release.label : 'Лейбл'}
                           {item.release.year ? ` • ${item.release.year}` : ''}
                         </span>
                         <span>{item.release.country || 'Импорт'}</span>
@@ -468,25 +496,17 @@ export const Catalog: React.FC = () => {
             })}
           </div>
 
-          {/* Кнопка "Загрузить еще" для бесконечного листания */}
-          {hasMore && (
+          {/* Быстрое листание следующей порции из уже загруженных в память пластинок */}
+          {displayedSlice.length < filteredItems.length && (
             <div className="pt-8 text-center font-mono">
               <button
-                onClick={loadMoreCatalog}
-                disabled={loadingMore}
+                onClick={loadMoreCards}
                 className="px-8 py-3.5 bg-[#141414] hover:bg-[#1f1f1f] text-white border border-[#262626] rounded-2xl text-xs font-bold transition inline-flex items-center gap-2 shadow-lg"
               >
-                {loadingMore ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-[#8b5cf6]" />
-                    <span>Загрузка...</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-4 h-4 text-[#8b5cf6]" />
-                    <span>Показать еще 24 пластинки</span>
-                  </>
-                )}
+                <ChevronDown className="w-4 h-4 text-[#8b5cf6]" />
+                <span>
+                  Показать еще {Math.min(CLIENT_BATCH_SIZE, filteredItems.length - displayedSlice.length)} (показано {displayedSlice.length} из {filteredItems.length})
+                </span>
               </button>
             </div>
           )}
