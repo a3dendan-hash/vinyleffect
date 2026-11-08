@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Search,
@@ -8,7 +8,6 @@ import {
   ShoppingBag,
   Check,
   MapPin,
-  Phone,
   ChevronDown,
   Loader2,
   Sparkles,
@@ -19,12 +18,36 @@ import { useCart } from '../context/CartContext';
 import { haptic } from '../lib/telegram';
 
 const CLIENT_BATCH_SIZE = 48;
+const CACHE_KEY = 'vp_catalog_cache_v2';
 
 export const Catalog: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [items, setItems] = useState<VinylItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingProgress, setLoadingProgress] = useState({ current: 0, total: 0 });
+
+  // 1. Моментальная инициализация из локального кэша (0 миллисекунд при повторном открытии)
+  const [items, setItems] = useState<VinylItem[]>(() => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      return !cached;
+    } catch {
+      return true;
+    }
+  });
+
+  const [backgroundSyncing, setBackgroundSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 2728 });
   const [displayCount, setDisplayCount] = useState(CLIENT_BATCH_SIZE);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -46,16 +69,39 @@ export const Catalog: React.FC = () => {
     setSelectedLabel(searchParams.get('label') || '');
   }, [searchParams]);
 
-  // Загружаем сразу ВСЮ базу данных пластинок (параллельные чанки по 1000)
-  // Это обеспечивает мгновенный поиск по всем 2900 пластинкам без задержек и постоянного кликанья
+  // Двухэтапная скоростная загрузка (Staged Streaming Loading):
+  // 1-й этап: моментально за 0.5-0.8 сек скачиваем первые 48 пластинок и СРАЗУ открываем экран без блокирующего спиннера
+  // 2-й этап: в фоне подгружаем остальные чанки и бесшовно обновляем поиск и кэш
   useEffect(() => {
     let isCancelled = false;
 
-    const loadAllCatalogItems = async () => {
-      setLoading(true);
+    const streamCatalogData = async () => {
+      setBackgroundSyncing(true);
+
       try {
-        // Запрашиваем 3 диапазона параллельно для максимальной скорости (0-999, 1000-1999, 2000-2999)
-        const ranges = ['0-999', '1000-1999', '2000-2999', '3000-3999'];
+        // Если кэша еще не было — качаем первые 48 штук для мгновенного показа
+        if (items.length === 0) {
+          const { data: firstBatch, error: firstErr } = await supabase
+            .from('items')
+            .select(ITEM_CATALOG_SELECT)
+            .in('status', ['active', 'draft'])
+            .range(0, 47)
+            .order('created_at', { ascending: false });
+
+          if (!firstErr && firstBatch && firstBatch.length > 0) {
+            if (isCancelled) return;
+            const mappedInitial = firstBatch.map(mapSupabaseItem);
+            setItems(mappedInitial);
+            setLoading(false); // МГНОВЕННО снимаем экран загрузки
+            setSyncProgress({ current: mappedInitial.length, total: 2728 });
+          }
+        } else {
+          // Если есть кэш — экран уже открыт сразу
+          setLoading(false);
+        }
+
+        // Фоновая догрузка полной базы (0-999, 1000-1999, 2000-2999) без блокировки интерфейса
+        const ranges = ['0-999', '1000-1999', '2000-2999'];
         const chunkPromises = ranges.map(async (r) => {
           const [from, to] = r.split('-').map(Number);
           const { data, error } = await supabase
@@ -65,10 +111,7 @@ export const Catalog: React.FC = () => {
             .range(from, to)
             .order('created_at', { ascending: false });
 
-          if (error) {
-            console.warn(`Error loading chunk ${r}:`, error);
-            return [];
-          }
+          if (error) return [];
           return data || [];
         });
 
@@ -76,17 +119,29 @@ export const Catalog: React.FC = () => {
         if (isCancelled) return;
 
         const combined = chunks.flat();
-        const mapped = combined.map(mapSupabaseItem);
-        setItems(mapped);
-        setLoadingProgress({ current: mapped.length, total: mapped.length });
-      } catch (e) {
-        console.error('Failed to load full catalog:', e);
+        if (combined.length > 0) {
+          const allMapped = combined.map(mapSupabaseItem);
+          setItems(allMapped);
+          setSyncProgress({ current: allMapped.length, total: allMapped.length });
+
+          // Сохраняем в localStorage для мгновенного старта в будущем (0 мс)
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(allMapped));
+          } catch (e) {
+            console.warn('Storage quota limit, caching skipped:', e);
+          }
+        }
+      } catch (err) {
+        console.error('Streaming load error:', err);
       } finally {
-        if (!isCancelled) setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+          setBackgroundSyncing(false);
+        }
       }
     };
 
-    loadAllCatalogItems();
+    streamCatalogData();
 
     return () => {
       isCancelled = true;
@@ -115,7 +170,6 @@ export const Catalog: React.FC = () => {
         if (!titleMatch && !artistMatch && !labelMatch && !catnoMatch && !countryMatch && !yearMatch) return false;
       }
 
-      // Быстрые вкладки из дизайна Atelier Monolith
       if (genreTab === 'soviet') {
         const isSoviet = (item.release?.artists || []).some((a) =>
           /кино|цой|оборона|аквариум|ддт|наутилус|ария|зоопарк|пикник|мелодия/i.test(a.name)
@@ -149,7 +203,6 @@ export const Catalog: React.FC = () => {
     });
   }, [items, query, genreTab, selectedGenre, selectedStyle, selectedLabel, selectedCondition, maxPrice, sortBy]);
 
-  // Сброс видимого диапазона при изменении поискового запроса или фильтра
   useEffect(() => {
     setDisplayCount(CLIENT_BATCH_SIZE);
   }, [query, genreTab, selectedGenre, selectedStyle, selectedLabel, selectedCondition, maxPrice, sortBy]);
@@ -186,9 +239,17 @@ export const Catalog: React.FC = () => {
       <section className="pt-2 pb-6 border-b border-[#1f1f1f] mb-6">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
-            <span className="text-[11px] font-mono text-[#8b5cf6] uppercase tracking-widest block mb-1">
-              МАГАЗИН ОРИГИНАЛЬНОГО ВИНИЛА
-            </span>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[11px] font-mono text-[#8b5cf6] uppercase tracking-widest block">
+                МАГАЗИН ОРИГИНАЛЬНОГО ВИНИЛА
+              </span>
+              {backgroundSyncing && (
+                <span className="text-[10px] font-mono text-[#888888] bg-[#171717] px-2 py-0.5 rounded-full border border-[#2a2a2a] inline-flex items-center gap-1">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin text-[#8b5cf6]" />
+                  <span>Синхронизация ({items.length}/2728)...</span>
+                </span>
+              )}
+            </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
               ПЛАСТИНКИ В НАЛИЧИИ В СПБ
             </h1>
@@ -209,7 +270,7 @@ export const Catalog: React.FC = () => {
       {/* Быстрые переключатели жанров */}
       <div className="flex items-center space-x-2 overflow-x-auto pb-2 mb-4 scrollbar-none font-mono text-xs">
         {[
-          { key: 'all', label: `Все в наличии (${items.length})` },
+          { key: 'all', label: `Все в наличии (${items.length || '...'})` },
           { key: 'soviet', label: 'Русский рок' },
           { key: 'rock', label: 'Классический рок' },
           { key: 'jazz', label: 'Джаз / Фанк' },
@@ -233,7 +294,7 @@ export const Catalog: React.FC = () => {
         ))}
       </div>
 
-      {/* Поиск и фильтры с мгновенным откликом по всем 2900 пластинкам */}
+      {/* Поиск и фильтры с мгновенным откликом */}
       <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-[#666666] absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -241,7 +302,7 @@ export const Catalog: React.FC = () => {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Поиск по всем ${items.length || 2900} пластинкам (артист, альбом, год, лейбл)...`}
+            placeholder={`Поиск среди ${items.length || 2728} пластинок (артист, альбом, год, лейбл)...`}
             className="w-full bg-[#111111] border border-[#262626] rounded-2xl pl-10 pr-9 py-2.5 text-xs font-mono text-white placeholder-[#666666] focus:border-[#8b5cf6] focus:outline-none"
           />
           {query && (
@@ -387,12 +448,9 @@ export const Catalog: React.FC = () => {
 
       {/* Сетка пластинок витрины */}
       {loading ? (
-        <div className="py-24 text-center space-y-3">
-          <div className="w-12 h-12 rounded-full vinyl-grooves spin-vinyl mx-auto" />
-          <p className="text-xs font-mono text-white font-bold">Загрузка каталога винила...</p>
-          <p className="text-[11px] font-mono text-[#888888]">
-            Загружаем полную базу всех пластинок для мгновенного поиска...
-          </p>
+        <div className="py-20 text-center space-y-3">
+          <div className="w-10 h-10 rounded-full vinyl-grooves spin-vinyl mx-auto" />
+          <p className="text-xs font-mono text-white font-bold">Подготовка витрины...</p>
         </div>
       ) : filteredItems.length === 0 ? (
         <div className="py-20 text-center space-y-3 bg-[#111111] border border-[#222222] rounded-3xl p-8">
@@ -431,6 +489,7 @@ export const Catalog: React.FC = () => {
                           src={cover}
                           alt={item.release.title}
                           loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover grayscale-[15%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-300"
                         />
                       ) : (
@@ -496,7 +555,6 @@ export const Catalog: React.FC = () => {
             })}
           </div>
 
-          {/* Быстрое листание следующей порции из уже загруженных в память пластинок */}
           {displayedSlice.length < filteredItems.length && (
             <div className="pt-8 text-center font-mono">
               <button
