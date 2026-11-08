@@ -33,19 +33,20 @@ const TelegramBackButtonManager: React.FC = () => {
     };
 
     try {
-      if (WebApp?.BackButton) {
+      const tg = WebApp as any;
+      if (tg?.BackButton) {
         if (location.pathname !== '/') {
-          WebApp.BackButton.show?.();
-          WebApp.BackButton.onClick?.(handleBack);
+          tg.BackButton.show?.();
+          tg.BackButton.onClick?.(handleBack);
         } else {
-          WebApp.BackButton.hide?.();
+          tg.BackButton.hide?.();
         }
       }
     } catch {}
 
     return () => {
       try {
-        WebApp?.BackButton?.offClick?.(handleBack);
+        (WebApp as any)?.BackButton?.offClick?.(handleBack);
       } catch {}
     };
   }, [location.pathname, navigate]);

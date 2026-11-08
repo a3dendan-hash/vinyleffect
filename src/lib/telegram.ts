@@ -8,7 +8,7 @@ export const initTelegramApp = () => {
     }
 
     const root = document.documentElement;
-    const params = WebApp?.themeParams || {};
+    const params: Record<string, string | undefined> = (WebApp?.themeParams as any) || {};
     root.style.setProperty('--tg-bg-color', params.bg_color || '#0a0a0a');
     root.style.setProperty('--tg-secondary-bg', params.secondary_bg_color || '#111111');
     root.style.setProperty('--tg-text-color', params.text_color || '#ffffff');
@@ -20,9 +20,9 @@ export const initTelegramApp = () => {
   }
 };
 
-export const getTelegramUser = () => {
+export const getTelegramUser = (): any => {
   try {
-    const user = WebApp?.initDataUnsafe?.user;
+    const user = (WebApp as any)?.initDataUnsafe?.user;
     if (user) return user;
   } catch {}
   return null;
@@ -50,27 +50,27 @@ export const isAdminUser = (): boolean => {
 export const haptic = {
   light: () => {
     try {
-      WebApp?.HapticFeedback?.impactOccurred?.('light');
+      (WebApp as any)?.HapticFeedback?.impactOccurred?.('light');
     } catch {}
   },
   medium: () => {
     try {
-      WebApp?.HapticFeedback?.impactOccurred?.('medium');
+      (WebApp as any)?.HapticFeedback?.impactOccurred?.('medium');
     } catch {}
   },
   success: () => {
     try {
-      WebApp?.HapticFeedback?.notificationOccurred?.('success');
+      (WebApp as any)?.HapticFeedback?.notificationOccurred?.('success');
     } catch {}
   },
   error: () => {
     try {
-      WebApp?.HapticFeedback?.notificationOccurred?.('error');
+      (WebApp as any)?.HapticFeedback?.notificationOccurred?.('error');
     } catch {}
   },
   selection: () => {
     try {
-      WebApp?.HapticFeedback?.selectionChanged?.();
+      (WebApp as any)?.HapticFeedback?.selectionChanged?.();
     } catch {}
   },
 };
