@@ -12,6 +12,14 @@ import { ArtistView } from './pages/ArtistView';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { InfoModal } from './components/InfoModal';
 
+// Нормализация хэша Telegram WebApp (#tgWebAppData=...) при старте для прямого открытия каталога
+if (typeof window !== 'undefined') {
+  const h = window.location.hash || '';
+  if (h.startsWith('#tgWebApp') || h === '' || h === '#') {
+    window.location.hash = '#/';
+  }
+}
+
 // Синхронизация системной кнопки Назад в Telegram Mini App
 const TelegramBackButtonManager: React.FC = () => {
   const location = useLocation();
@@ -51,9 +59,15 @@ const MainLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // При заходе в приложение или браузер всегда загружается только каталог (защита от случайного открытия админки)
+  // При заходе в приложение или браузер всегда загружается только каталог (защита от случайного открытия админки и пустых экранов)
   useEffect(() => {
     if (!isAdmin && location.pathname === '/admin') {
+      navigate('/', { replace: true });
+    } else if (
+      !location.pathname ||
+      location.pathname === '' ||
+      location.pathname.startsWith('/tgWebApp')
+    ) {
       navigate('/', { replace: true });
     }
   }, [isAdmin, location.pathname, navigate]);
@@ -131,6 +145,7 @@ const MainLayout: React.FC = () => {
         <Route path="/record/:id" element={<RecordDetails />} />
         <Route path="/artist/:id" element={<ArtistView />} />
         {isAdmin && <Route path="/admin" element={<AdminDashboard />} />}
+        <Route path="*" element={<Catalog />} />
       </Routes>
 
       {/* Модалка О магазине */}

@@ -141,7 +141,7 @@ export const AdminDashboard: React.FC = () => {
     sold: 0,
   });
 
-  // Состояния фильтрации админки (все вынесены во вкладку «Фильтры»)
+  // Состояния фильтрации админки
   const [query, setQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [selectedStyle, setSelectedStyle] = useState('');
@@ -230,67 +230,127 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleDeleteItem = async (itemId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteItem = async (itemId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!window.confirm('Удалить эту пластинку из базы?')) return;
     haptic.medium();
     const { error } = await supabase.from('items').delete().eq('id', itemId);
     if (!error) {
       setItems((prev) => prev.filter((it) => it.id !== itemId));
       fetchCounts();
+    } else {
+      alert('Ошибка при удалении: ' + error.message);
     }
   };
 
-  // Списки для выпадающих фильтров Discogs
+  // Списки для выпадающих фильтров
   const allGenres = useMemo(() => {
-    const fromItems = items.flatMap((i) => i.release.genre);
-    return Array.from(new Set([...fromItems, ...DISCOGS_GENRES])).filter(Boolean).sort();
+    const fromItems = items.flatMap((i) => i.release.genre).filter(Boolean);
+    return Array.from(new Set(fromItems)).sort();
   }, [items]);
 
   const allStyles = useMemo(() => {
-    const fromItems = items.flatMap((i) => i.release.style);
-    return Array.from(new Set([...fromItems, ...DISCOGS_STYLES])).filter(Boolean).sort();
+    const fromItems = items.flatMap((i) => i.release.style).filter(Boolean);
+    return Array.from(new Set(fromItems)).sort();
   }, [items]);
 
   const allLabels = useMemo(() => {
     return Array.from(new Set(items.map((i) => i.release.label))).filter(Boolean).sort() as string[];
   }, [items]);
 
+  // Список стран: объединяем страну релиза и страну авторов, добавляя пресеты
   const allCountries = useMemo(() => {
-    const standard = ['Russia', 'USSR', 'Germany', 'UK', 'US', 'Japan', 'France', 'Italy', 'Netherlands', 'Canada'];
-    const fromItems = items.map((i) => i.release.country).filter(Boolean) as string[];
-    return Array.from(new Set([...fromItems, ...standard])).sort();
+    const set = new Set<string>();
+    items.forEach((item) => {
+      if (item.release?.country) set.add(item.release.country);
+      const artistsStr = (item.release?.artists || []).map((a) => a.name).join(', ');
+      const ac = resolveArtistCountry(artistsStr, item.release?.discogs_notes);
+      if (ac && ac !== 'Импорт' && ac !== 'Международный') {
+        set.add(ac);
+      }
+    });
+
+    ['СССР / Россия', 'Великобритания (UK)', 'США (USA)', 'Германия (Germany)', 'Франция (France)', 'Италия (Italy)', 'Швеция (Sweden)'].forEach((c) => set.add(c));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
+  // Фильтрация и поиск по всей базе черновиков
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const queryWords = q ? q.split(/\s+/).filter(Boolean) : [];
 
     const list = items.filter((item) => {
-      if (q) {
-        const titleMatch = (item.release?.title || '').toLowerCase().includes(q);
-        const artistMatch = (item.release?.artists || []).some((a) => a.name.toLowerCase().includes(q));
-        const labelMatch = (item.release?.label || '').toLowerCase().includes(q);
-        const catnoMatch = (item.release?.catno || '').toLowerCase().includes(q);
-        const countryMatch = (item.release?.country || '').toLowerCase().includes(q);
-        const discogsIdMatch = (item.release?.discogs_release_id || '').includes(q);
-        if (!titleMatch && !artistMatch && !labelMatch && !catnoMatch && !countryMatch && !discogsIdMatch) {
+      // 1. Полнотекстовый поиск по словам (артист, название, лейбл, номер, код Discogs, страна)
+      if (queryWords.length > 0) {
+        const artistsStr = (item.release?.artists || []).map((a) => a.name).join(' ');
+        const artistCountry = resolveArtistCountry(artistsStr, item.release?.discogs_notes);
+        const searchable = [
+          item.release?.title,
+          artistsStr,
+          item.release?.label,
+          item.release?.catno,
+          item.release?.country,
+          artistCountry,
+          item.release?.discogs_release_id,
+          item.extra_info,
+          item.description,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        const allMatched = queryWords.every((word) => searchable.includes(word));
+        if (!allMatched) return false;
+      }
+
+      // 2. Фильтр по жанру
+      if (selectedGenre && !item.release.genre.includes(selectedGenre)) return false;
+
+      // 3. Фильтр по стилю
+      if (selectedStyle && !item.release.style.includes(selectedStyle)) return false;
+
+      // 4. Фильтр по лейблу
+      if (selectedLabel && item.release.label !== selectedLabel) return false;
+
+      // 5. Фильтр по стране (проверяем и страну производства, и страну авторов)
+      if (selectedCountry) {
+        const artistsStr = (item.release?.artists || []).map((a) => a.name).join(' ');
+        const artistCountry = resolveArtistCountry(artistsStr, item.release?.discogs_notes).toLowerCase();
+        const releaseCountry = (item.release?.country || '').toLowerCase();
+        const sel = selectedCountry.toLowerCase();
+
+        const matchRelease = releaseCountry.includes(sel);
+        const matchArtist = artistCountry.includes(sel);
+        const isSovietMatch =
+          (sel.includes('ссср') || sel.includes('russia') || sel.includes('росс') || sel.includes('ussr')) &&
+          (artistCountry.includes('ссср') || artistCountry.includes('росс') || releaseCountry.includes('russia') || releaseCountry.includes('ussr'));
+        const isUkMatch =
+          (sel.includes('uk') || sel.includes('великобрит')) &&
+          (artistCountry.includes('uk') || artistCountry.includes('великобрит') || releaseCountry.includes('uk'));
+        const isUsMatch =
+          (sel.includes('usa') || sel.includes('сша')) &&
+          (artistCountry.includes('usa') || artistCountry.includes('сша') || releaseCountry.includes('us'));
+
+        if (!matchRelease && !matchArtist && !isSovietMatch && !isUkMatch && !isUsMatch) {
           return false;
         }
       }
 
-      if (selectedGenre && !item.release.genre.includes(selectedGenre)) return false;
-      if (selectedStyle && !item.release.style.includes(selectedStyle)) return false;
-      if (selectedLabel && item.release.label !== selectedLabel) return false;
-      if (selectedCountry && item.release.country !== selectedCountry) return false;
+      // 6. Фильтр по состоянию
       if (selectedCondition && item.condition_media !== selectedCondition) return false;
+
+      // 7. Фильтр по типу издания
       if (selectedReleaseType && item.release_type !== selectedReleaseType) return false;
 
+      // 8. Фильтр по цене
       if (minPrice && item.price < Number(minPrice)) return false;
       if (maxPrice && item.price > Number(maxPrice)) return false;
 
+      // 9. Фильтр по годам
       if (yearFrom && (item.release.year || 0) < Number(yearFrom)) return false;
       if (yearTo && (item.release.year || 0) > Number(yearTo)) return false;
 
+      // 10. Фильтр по типу цены
       if (priceTypeFilter === 'with_price' && item.price <= 0) return false;
       if (priceTypeFilter === 'no_price' && item.price > 0) return false;
 
@@ -401,7 +461,7 @@ export const AdminDashboard: React.FC = () => {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Поиск по всем ${items.length} ${statusFilter === 'draft' ? 'черновикам' : 'пластинкам'}...`}
+              placeholder={`Поиск по всем ${items.length} ${statusFilter === 'draft' ? 'черновикам' : 'пластинкам'} по артисту, названию, коду...`}
               className="w-full bg-[#171717] border border-[#2a2a2a] rounded-xl pl-10 pr-9 py-2 text-white placeholder-[#666666] focus:border-[#8b5cf6] focus:outline-none"
             />
             {query && (
@@ -415,7 +475,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Переключатель режима отображения: Сетка (больше всего) vs Список */}
+            {/* Переключатель режима отображения: Сетка vs Список */}
             <div className="flex items-center bg-[#171717] p-1 rounded-xl border border-[#2a2a2a]">
               <button
                 onClick={() => {
@@ -498,36 +558,56 @@ export const AdminDashboard: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
-                <label className="block text-[#888888] mb-1">Жанр (Discogs)</label>
+                <label className="block text-[#888888] mb-1">Страна (производство и авторы)</label>
                 <select
-                  value={selectedGenre}
-                  onChange={(e) => setSelectedGenre(e.target.value)}
+                  value={selectedCountry}
+                  onChange={(e) => setSelectedCountry(e.target.value)}
                   className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
                 >
-                  <option value="">Все жанры</option>
-                  {allGenres.map((g) => (
-                    <option key={g} value={g}>
-                      {g}
+                  <option value="">Все страны</option>
+                  {allCountries.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="block text-[#888888] mb-1">Стиль (Discogs)</label>
-                <select
-                  value={selectedStyle}
-                  onChange={(e) => setSelectedStyle(e.target.value)}
-                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
-                >
-                  <option value="">Все стили</option>
-                  {allStyles.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {allGenres.length > 0 && (
+                <div>
+                  <label className="block text-[#888888] mb-1">Жанр</label>
+                  <select
+                    value={selectedGenre}
+                    onChange={(e) => setSelectedGenre(e.target.value)}
+                    className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                  >
+                    <option value="">Все жанры</option>
+                    {allGenres.map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {allStyles.length > 0 && (
+                <div>
+                  <label className="block text-[#888888] mb-1">Стиль</label>
+                  <select
+                    value={selectedStyle}
+                    onChange={(e) => setSelectedStyle(e.target.value)}
+                    className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                  >
+                    <option value="">Все стили</option>
+                    {allStyles.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[#888888] mb-1">Лейбл</label>
@@ -546,22 +626,6 @@ export const AdminDashboard: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-[#888888] mb-1">Страна</label>
-                <select
-                  value={selectedCountry}
-                  onChange={(e) => setSelectedCountry(e.target.value)}
-                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
-                >
-                  <option value="">Все страны</option>
-                  {allCountries.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
                 <label className="block text-[#888888] mb-1">Состояние (Goldmine)</label>
                 <select
                   value={selectedCondition}
@@ -574,6 +638,19 @@ export const AdminDashboard: React.FC = () => {
                       {c}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Тип издания</label>
+                <select
+                  value={selectedReleaseType}
+                  onChange={(e) => setSelectedReleaseType(e.target.value)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                >
+                  <option value="">Все типы</option>
+                  <option value="Оригинал">Оригинал</option>
+                  <option value="Переиздание">Переиздание</option>
                 </select>
               </div>
 
@@ -617,13 +694,13 @@ export const AdminDashboard: React.FC = () => {
 
         <div className="text-[11px] text-[#737373] flex items-center justify-between">
           <span>
-            Показано <strong className="text-white">{displayedSlice.length}</strong> из {filtered.length} (всего в этой вкладке: {items.length})
+            Показано <strong className="text-white">{filtered.length}</strong> из {items.length} (активный фильтр)
           </span>
           <span className="text-[#8b5cf6]">Кликните на карточку для открытия полного редактора</span>
         </div>
       </div>
 
-      {/* Список / Сетка пластинок текущей вкладки (с адаптацией под полный экран) */}
+      {/* Список / Сетка пластинок текущей вкладки */}
       {loading ? (
         <div className="py-24 text-center space-y-3">
           <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin mx-auto" />
@@ -635,9 +712,17 @@ export const AdminDashboard: React.FC = () => {
           <h4 className="text-white text-sm font-bold">Ничего не найдено</h4>
           <p className="text-xs text-[#737373]">
             {statusFilter === 'draft'
-              ? 'Черновики пусты или не соответствуют фильтру поиска.'
+              ? 'Черновики не соответствуют параметрам поиска или фильтрации.'
               : 'Перенесите пластинки из черновиков на витрину.'}
           </p>
+          {activeFiltersCount > 0 && (
+            <button
+              onClick={resetAllFilters}
+              className="mt-3 px-4 py-2 bg-white text-black font-semibold rounded-xl text-xs"
+            >
+              Сбросить фильтры
+            </button>
+          )}
         </div>
       ) : viewMode === 'grid' ? (
         /* РЕЖИМ СЕТКИ: МАКСИМАЛЬНОЕ КОЛИЧЕСТВО НА ПОЛНОМ ЭКРАНЕ (2-8 колонок) */
@@ -655,7 +740,7 @@ export const AdminDashboard: React.FC = () => {
                     haptic.light();
                     setEditingItem(item);
                   }}
-                  className="bg-[#111111] border border-[#222222] hover:border-[#8b5cf6] rounded-2xl overflow-hidden flex flex-col justify-between transition-all shadow-md cursor-pointer group hover:bg-[#151515]"
+                  className="bg-[#111111] border border-[#222222] hover:border-[#8b5cf6] rounded-2xl overflow-hidden flex flex-col justify-between transition-all shadow-md cursor-pointer group hover:bg-[#151515] relative"
                 >
                   <div>
                     {/* Обложка с мгновенной авто-подгрузкой */}
@@ -663,14 +748,41 @@ export const AdminDashboard: React.FC = () => {
                       <DraftCover item={item} />
 
                       {/* Бейджи состояния и типа издания */}
-                      <div className="absolute top-2 left-2 flex flex-col gap-1">
+                      <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
                         <span className="text-[9px] font-mono px-1.5 py-0.5 bg-black/85 backdrop-blur-sm border border-[#333333] text-white rounded">
                           {item.condition_media || 'NM-'} • {item.release_type || 'Оригинал'}
                         </span>
                       </div>
 
+                      {/* ВСЕГДА ВИДИМЫЕ ПЛАВАЮЩИЕ КНОПКИ РЕДАКТИРОВАНИЯ И УДАЛЕНИЯ В ВЕРХНЕМ ПРАВОМ УГЛУ */}
+                      <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            haptic.light();
+                            setEditingItem(item);
+                          }}
+                          className="p-1.5 bg-black/90 hover:bg-[#8b5cf6] text-white rounded-lg border border-white/20 transition shadow-lg"
+                          title="Редактировать карточку"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteItem(item.id, e);
+                          }}
+                          className="p-1.5 bg-black/90 hover:bg-red-600 text-red-400 hover:text-white rounded-lg border border-white/20 transition shadow-lg"
+                          title="Удалить пластинку"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
                       {item.important_details?.includes('Цветной') && (
-                        <div className="absolute top-2 right-2">
+                        <div className="absolute bottom-2 right-2 z-10">
                           <span className="text-[9px] font-mono px-1.5 py-0.5 bg-purple-950/90 text-purple-200 border border-purple-700 rounded flex items-center gap-1">
                             <Sparkles className="w-2.5 h-2.5" />
                             Цветной
@@ -705,21 +817,22 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Нижний бар: цена и действия */}
+                  {/* Нижний бар: цена и действия (никогда не обрезаются) */}
                   <div
-                    className="p-3 pt-2 border-t border-[#1a1a1a] flex items-center justify-between gap-1.5 font-mono"
+                    className="p-3 pt-2 border-t border-[#1a1a1a] flex flex-col gap-2 font-mono"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div>
-                      <span className="text-[9px] text-[#737373] block">Цена:</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] text-[#737373]">Цена:</span>
                       <span className="text-xs font-bold text-white">
                         {item.price > 0 ? `${item.price.toLocaleString('ru-RU')} ₽` : '0 ₽'}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      {statusFilter === 'draft' && (
+                    <div className="flex items-center gap-1.5 w-full">
+                      {statusFilter === 'draft' ? (
                         <button
+                          type="button"
                           onClick={() => {
                             const p = prompt('Укажите цену для публикации на витрину (₽):', String(item.price || 4900));
                             if (p !== null) {
@@ -729,38 +842,38 @@ export const AdminDashboard: React.FC = () => {
                               }
                             }
                           }}
-                          className="px-2 py-1 bg-white hover:bg-[#8b5cf6] text-black hover:text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow"
+                          className="flex-1 py-1.5 bg-white hover:bg-[#8b5cf6] text-black hover:text-white rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 shadow min-w-0"
                           title="Опубликовать в каталог"
                         >
-                          <Send className="w-3 h-3" />
-                          <span>В каталог</span>
+                          <Send className="w-3 h-3 shrink-0" />
+                          <span className="truncate">В каталог</span>
                         </button>
-                      )}
-
-                      {statusFilter === 'active' && (
+                      ) : (
                         <button
+                          type="button"
                           onClick={() => handleQuickStatusChange(item.id, 'draft')}
-                          className="px-2 py-1 bg-[#1a1a1a] hover:bg-[#252525] text-[#888888] hover:text-white border border-[#2a2a2a] rounded-lg text-[10px] transition"
-                          title="В черновики"
+                          className="flex-1 py-1.5 bg-[#1a1a1a] hover:bg-[#252525] text-[#888888] hover:text-white border border-[#2a2a2a] rounded-xl text-[11px] transition text-center min-w-0"
                         >
                           В черновики
                         </button>
                       )}
 
                       <button
+                        type="button"
                         onClick={() => setEditingItem(item)}
-                        className="p-1.5 bg-[#171717] hover:bg-[#252525] text-white border border-[#2a2a2a] rounded-lg transition"
-                        title="Редактировать карточку"
+                        className="p-1.5 bg-[#1a1a1a] hover:bg-[#252525] text-white border border-[#2a2a2a] rounded-xl transition shrink-0"
+                        title="Редактировать"
                       >
-                        <Edit3 className="w-3 h-3" />
+                        <Edit3 className="w-3.5 h-3.5" />
                       </button>
 
                       <button
+                        type="button"
                         onClick={(e) => handleDeleteItem(item.id, e)}
-                        className="p-1.5 bg-[#171717] hover:bg-red-950 text-[#666666] hover:text-red-400 border border-[#2a2a2a] rounded-lg transition"
+                        className="p-1.5 bg-[#1a1a1a] hover:bg-red-950 text-red-400 hover:text-red-300 border border-[#2a2a2a] rounded-xl transition shrink-0"
                         title="Удалить"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -841,12 +954,8 @@ export const AdminDashboard: React.FC = () => {
                           <span className="truncate max-w-[120px]">{item.release.label}</span>
                         </>
                       )}
-                      {item.release.country && (
-                        <>
-                          <span>•</span>
-                          <span>Сделано: {releaseCountry}</span>
-                        </>
-                      )}
+                      <span>•</span>
+                      <span>Сделано: {releaseCountry}</span>
                       <span>•</span>
                       <span className="text-[#c084fc]">
                         Авторы: {artistCountry}

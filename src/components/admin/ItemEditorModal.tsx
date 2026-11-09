@@ -448,14 +448,35 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
         </div>
 
         {/* Футер с кнопками сохранения */}
-        <div className="px-6 py-4 border-t border-[#222222] bg-[#141414] flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-xl text-[#888888] hover:text-white"
-          >
-            Отмена
-          </button>
+        <div className="px-6 py-4 border-t border-[#222222] bg-[#141414] flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl text-[#888888] hover:text-white"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (window.confirm('Вы действительно хотите навсегда удалить эту пластинку из базы?')) {
+                  const { error } = await supabase.from('items').delete().eq('id', item.id);
+                  if (!error) {
+                    haptic.medium();
+                    onSaved();
+                    onClose();
+                  } else {
+                    alert('Ошибка при удалении: ' + error.message);
+                  }
+                }
+              }}
+              className="px-3.5 py-2.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/60 rounded-xl transition flex items-center gap-1.5 text-xs font-mono font-bold"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Удалить пластинку</span>
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             <button
