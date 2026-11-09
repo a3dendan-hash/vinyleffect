@@ -21,6 +21,7 @@ import { DiscogsImporter } from '../components/admin/DiscogsImporter';
 import { ItemEditorModal } from '../components/admin/ItemEditorModal';
 import { haptic } from '../lib/telegram';
 import { DISCOGS_GENRES, DISCOGS_STYLES } from '../lib/discogs';
+import { resolveArtistCountry } from '../lib/artistCountry';
 
 const CLIENT_ADMIN_BATCH = 50;
 
@@ -571,9 +572,13 @@ export const AdminDashboard: React.FC = () => {
                       {item.release.country && (
                         <>
                           <span>•</span>
-                          <span>{item.release.country}</span>
+                          <span>Сделано: {item.release.country}</span>
                         </>
                       )}
+                      <span>•</span>
+                      <span className="text-[#c084fc]">
+                        Авторы: {resolveArtistCountry((item.release?.artists || []).map((a) => a.name).join(', '), item.release.discogs_notes)}
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-3 pt-0.5" onClick={(e) => e.stopPropagation()}>

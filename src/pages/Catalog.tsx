@@ -5,8 +5,6 @@ import {
   SlidersHorizontal,
   Disc3,
   X,
-  ShoppingBag,
-  Check,
   MapPin,
   ChevronDown,
   Loader2,
@@ -15,17 +13,16 @@ import {
 } from 'lucide-react';
 import { supabase, ITEM_CATALOG_SELECT } from '../lib/supabase';
 import { VinylItem, mapSupabaseItem } from '../types/database';
-import { useCart } from '../context/CartContext';
 import { haptic } from '../lib/telegram';
-import { DISCOGS_GENRES, DISCOGS_STYLES } from '../lib/discogs';
+import { resolveArtistCountry } from '../lib/artistCountry';
 
 const CLIENT_BATCH_SIZE = 48;
-const CACHE_KEY = 'vp_catalog_cache_v5';
+const CACHE_KEY = 'vp_catalog_cache_v6';
 
 export const Catalog: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Инициализация из локального кэша для активных позиций витрины
+  // Инициализация из локального кэша для мгновенного отображения витрины
   const [items, setItems] = useState<VinylItem[]>(() => {
     try {
       const cached = localStorage.getItem(CACHE_KEY);
@@ -63,10 +60,7 @@ export const Catalog: React.FC = () => {
   const [maxPrice, setMaxPrice] = useState<string>('');
   const [yearFrom, setYearFrom] = useState<string>('');
   const [yearTo, setYearTo] = useState<string>('');
-  const [onlyColored, setOnlyColored] = useState<boolean>(false);
   const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc' | 'year_desc'>('newest');
-
-  const { addToCart, isInCart } = useCart();
 
   useEffect(() => {
     setSelectedGenre(searchParams.get('genre') || '');
@@ -109,25 +103,43 @@ export const Catalog: React.FC = () => {
     };
   }, []);
 
-  // Формируем уникальные списки для выпадающих фильтров
+  // СТРОГО: выпадающие списки фильтров содержат ТОЛЬКО значения, которые реально есть на витрине
   const allGenres = useMemo(() => {
-    const fromItems = items.flatMap((i) => i.release.genre);
-    return Array.from(new Set([...fromItems, ...DISCOGS_GENRES])).filter(Boolean).sort();
+    const set = new Set<string>();
+    items.forEach((item) => {
+      (item.release?.genre || []).forEach((g) => {
+        if (g && typeof g === 'string' && g.trim()) set.add(g.trim());
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
   const allStyles = useMemo(() => {
-    const fromItems = items.flatMap((i) => i.release.style);
-    return Array.from(new Set([...fromItems, ...DISCOGS_STYLES])).filter(Boolean).sort();
+    const set = new Set<string>();
+    items.forEach((item) => {
+      (item.release?.style || []).forEach((s) => {
+        if (s && typeof s === 'string' && s.trim()) set.add(s.trim());
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
   const allLabels = useMemo(() => {
-    return Array.from(new Set(items.map((i) => i.release.label))).filter(Boolean).sort() as string[];
+    const set = new Set<string>();
+    items.forEach((item) => {
+      const lbl = item.release?.label;
+      if (lbl && typeof lbl === 'string' && lbl.trim()) set.add(lbl.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
   const allCountries = useMemo(() => {
-    const standard = ['Russia', 'USSR', 'Germany', 'UK', 'US', 'Japan', 'France', 'Italy', 'Netherlands', 'Canada'];
-    const fromItems = items.map((i) => i.release.country).filter(Boolean) as string[];
-    return Array.from(new Set([...fromItems, ...standard])).sort();
+    const set = new Set<string>();
+    items.forEach((item) => {
+      const c = item.release?.country;
+      if (c && typeof c === 'string' && c.trim()) set.add(c.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
   // Фильтрация товаров на клиенте
@@ -170,14 +182,6 @@ export const Catalog: React.FC = () => {
       if (yearFrom && (item.release.year || 0) < Number(yearFrom)) return false;
       if (yearTo && (item.release.year || 0) > Number(yearTo)) return false;
 
-      // Фильтр: только цветной винил
-      if (onlyColored) {
-        const isColored = item.important_details?.toLowerCase().includes('цветной') ||
-          item.release.format_details?.toLowerCase().includes('color') ||
-          item.release.format_details?.toLowerCase().includes('coloured');
-        if (!isColored) return false;
-      }
-
       return true;
     });
 
@@ -200,7 +204,6 @@ export const Catalog: React.FC = () => {
     maxPrice,
     yearFrom,
     yearTo,
-    onlyColored,
     sortBy,
   ]);
 
@@ -218,7 +221,6 @@ export const Catalog: React.FC = () => {
     maxPrice,
     yearFrom,
     yearTo,
-    onlyColored,
     sortBy,
   ]);
 
@@ -244,7 +246,6 @@ export const Catalog: React.FC = () => {
     setMaxPrice('');
     setYearFrom('');
     setYearTo('');
-    setOnlyColored(false);
     setSortBy('newest');
     setSearchParams({});
   };
@@ -260,7 +261,6 @@ export const Catalog: React.FC = () => {
     maxPrice,
     yearFrom,
     yearTo,
-    onlyColored,
   ].filter(Boolean).length;
 
   return (
@@ -281,9 +281,6 @@ export const Catalog: React.FC = () => {
             <div className="pt-1 text-white flex items-center gap-2">
               <MapPin className="w-3.5 h-3.5 text-[#8b5cf6]" />
               <span>Санкт-Петербург · ул. Рубинштейна</span>
-              <a href="tel:+79219675106" className="text-[#8b5cf6] hover:underline font-bold ml-1">
-                +7 921 967-51-06
-              </a>
             </div>
           </div>
         </div>
@@ -344,13 +341,13 @@ export const Catalog: React.FC = () => {
         </div>
       </div>
 
-      {/* Панель «Фильтры» (все фильтры с Discogs и витрины собраны здесь) */}
+      {/* Панель «Фильтры» (только присутствующие на витрине параметры) */}
       {showFilters && (
         <div className="bg-[#111111] border border-[#222222] rounded-3xl p-5 mb-5 space-y-4 font-mono text-xs shadow-xl animate-in fade-in duration-200">
           <div className="flex items-center justify-between border-b border-[#222222] pb-3">
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="w-4 h-4 text-[#8b5cf6]" />
-              <h3 className="font-bold text-white uppercase tracking-wider text-xs">Параметры фильтрации</h3>
+              <h3 className="font-bold text-white uppercase tracking-wider text-xs">Параметры фильтрации витрины</h3>
             </div>
             {activeFiltersCount > 0 && (
               <button
@@ -364,9 +361,9 @@ export const Catalog: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Жанр (Discogs) */}
+            {/* Жанр (только с витрины) */}
             <div>
-              <label className="block text-[#888888] mb-1.5 font-medium">Жанр (Discogs)</label>
+              <label className="block text-[#888888] mb-1.5 font-medium">Жанр (в наличии)</label>
               <select
                 value={selectedGenre}
                 onChange={(e) => setSelectedGenre(e.target.value)}
@@ -381,9 +378,9 @@ export const Catalog: React.FC = () => {
               </select>
             </div>
 
-            {/* Стиль (Discogs) */}
+            {/* Стиль (только с витрины) */}
             <div>
-              <label className="block text-[#888888] mb-1.5 font-medium">Стиль (Discogs)</label>
+              <label className="block text-[#888888] mb-1.5 font-medium">Стиль (в наличии)</label>
               <select
                 value={selectedStyle}
                 onChange={(e) => setSelectedStyle(e.target.value)}
@@ -398,7 +395,7 @@ export const Catalog: React.FC = () => {
               </select>
             </div>
 
-            {/* Лейбл */}
+            {/* Лейбл (только с витрины) */}
             <div>
               <label className="block text-[#888888] mb-1.5 font-medium">Лейбл</label>
               <select
@@ -415,9 +412,9 @@ export const Catalog: React.FC = () => {
               </select>
             </div>
 
-            {/* Страна */}
+            {/* Страна производства (только с витрины) */}
             <div>
-              <label className="block text-[#888888] mb-1.5 font-medium">Страна выпуска</label>
+              <label className="block text-[#888888] mb-1.5 font-medium">Страна производства</label>
               <select
                 value={selectedCountry}
                 onChange={(e) => setSelectedCountry(e.target.value)}
@@ -464,7 +461,7 @@ export const Catalog: React.FC = () => {
             </div>
 
             {/* Диапазон цен (от / до) */}
-            <div className="col-span-1 sm:col-span-2">
+            <div>
               <label className="block text-[#888888] mb-1.5 font-medium">Цена (₽)</label>
               <div className="grid grid-cols-2 gap-2">
                 <input
@@ -485,40 +482,24 @@ export const Catalog: React.FC = () => {
             </div>
 
             {/* Диапазон года (от / до) */}
-            <div className="col-span-1 sm:col-span-2">
+            <div>
               <label className="block text-[#888888] mb-1.5 font-medium">Год выпуска</label>
               <div className="grid grid-cols-2 gap-2">
                 <input
                   type="number"
                   value={yearFrom}
                   onChange={(e) => setYearFrom(e.target.value)}
-                  placeholder="Год от (напр. 1970)"
+                  placeholder="От"
                   className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white placeholder-[#555555] focus:border-[#8b5cf6] focus:outline-none"
                 />
                 <input
                   type="number"
                   value={yearTo}
                   onChange={(e) => setYearTo(e.target.value)}
-                  placeholder="Год до (напр. 1995)"
+                  placeholder="До"
                   className="w-full bg-[#171717] border border-[#262626] rounded-xl px-3 py-2 text-white placeholder-[#555555] focus:border-[#8b5cf6] focus:outline-none"
                 />
               </div>
-            </div>
-
-            {/* Чекбокс: Только цветной винил */}
-            <div className="col-span-1 sm:col-span-2 flex items-center pt-2">
-              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={onlyColored}
-                  onChange={(e) => setOnlyColored(e.target.checked)}
-                  className="w-4 h-4 rounded bg-[#171717] border border-[#333333] text-[#8b5cf6] focus:ring-0 focus:ring-offset-0 cursor-pointer"
-                />
-                <span className="text-white font-medium flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-[#8b5cf6]" />
-                  Только цветной винил / Limited Edition
-                </span>
-              </label>
             </div>
           </div>
         </div>
@@ -550,12 +531,6 @@ export const Catalog: React.FC = () => {
               Состояние: {selectedCondition}
             </span>
           )}
-          {onlyColored && (
-            <span className="bg-purple-950/70 border border-purple-800/60 text-[#c084fc] px-2.5 py-1 rounded-lg flex items-center gap-1">
-              <Sparkles className="w-3 h-3" />
-              Цветной
-            </span>
-          )}
         </div>
 
         {activeFiltersCount > 0 && (
@@ -572,7 +547,7 @@ export const Catalog: React.FC = () => {
       {loading ? (
         <div className="py-20 text-center space-y-3">
           <div className="w-10 h-10 rounded-full vinyl-grooves spin-vinyl mx-auto" />
-          <p className="text-xs font-mono text-white font-bold">Загрузка витрины магазина...</p>
+          <p className="text-xs font-mono text-white font-bold">Загрузка каталога витрины...</p>
         </div>
       ) : filteredItems.length === 0 ? (
         <div className="py-20 text-center space-y-3 bg-[#111111] border border-[#222222] rounded-3xl p-8">
@@ -580,8 +555,8 @@ export const Catalog: React.FC = () => {
           <h3 className="font-bold text-white text-base">Ничего не найдено</h3>
           <p className="text-xs text-[#888888] font-mono">
             {activeFiltersCount > 0
-              ? 'Попробуйте смягчить активные фильтры поиска.'
-              : 'В данный момент пластинки готовятся к выкладке.'}
+              ? 'Попробуйте изменить выбранные параметры фильтрации.'
+              : 'В данный момент витрина обновляется.'}
           </p>
           {activeFiltersCount > 0 && (
             <button
@@ -597,7 +572,9 @@ export const Catalog: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {displayedSlice.map((item) => {
               const cover = item.photos[0] || item.release.default_cover_url;
-              const inCart = isInCart(item.id);
+              const artistNames = (item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители';
+              const artistCountry = resolveArtistCountry(artistNames, item.release.discogs_notes);
+              const releaseCountry = item.release.country || 'Импорт';
 
               return (
                 <article
@@ -640,41 +617,51 @@ export const Catalog: React.FC = () => {
                       )}
                     </Link>
 
-                    <div className="p-4 space-y-1">
+                    <div className="p-4 space-y-1.5">
                       <div className="flex items-center justify-between text-[11px] font-mono text-[#737373]">
                         <span className="truncate max-w-[140px]">
                           {item.release.label ? item.release.label : 'Лейбл'}
                           {item.release.year ? ` • ${item.release.year}` : ''}
                         </span>
-                        <span>{item.release.country || 'Импорт'}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-[#1a1a1a] text-[#8b5cf6] border border-[#2a2a2a] text-[10px]">
+                          {item.release_type || 'Оригинал'}
+                        </span>
                       </div>
 
                       <h3 className="text-sm font-bold text-white uppercase group-hover:text-[#8b5cf6] transition-colors leading-snug truncate">
-                        {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'}
+                        {artistNames}
                       </h3>
                       <p className="text-xs text-[#a3a3a3] truncate">{item.release.title}</p>
+
+                      {/* Страна релиза (где сделана) и страна авторов */}
+                      <div className="pt-2 space-y-1 text-[11px] font-mono border-t border-[#1a1a1a]">
+                        <div className="flex items-center justify-between text-[#888888]">
+                          <span>Сделано в:</span>
+                          <span className="text-white font-medium truncate max-w-[145px]">{releaseCountry}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[#888888]">
+                          <span>Страна авторов:</span>
+                          <span className="text-[#c084fc] font-medium truncate max-w-[145px]">{artistCountry}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="p-4 pt-2 border-t border-[#1a1a1a] flex items-center justify-between">
-                    <span className="text-sm font-semibold font-mono text-white">
-                      {item.price > 0 ? `${item.price.toLocaleString('ru-RU')} ₽` : 'По запросу'}
-                    </span>
+                  <div className="p-4 pt-2.5 border-t border-[#1a1a1a] flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-mono text-[#737373] block">Стоимость:</span>
+                      <span className="text-sm font-semibold font-mono text-white">
+                        {item.price > 0 ? `${item.price.toLocaleString('ru-RU')} ₽` : 'Цена по запросу'}
+                      </span>
+                    </div>
 
-                    <button
-                      onClick={() => {
-                        haptic.light();
-                        addToCart(item);
-                      }}
-                      disabled={inCart}
-                      className={`px-3.5 py-1.5 font-mono text-xs rounded-xl transition border ${
-                        inCart
-                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                          : 'bg-[#1a1a1a] hover:bg-white text-[#d4d4d4] hover:text-black border-[#2c2c2c] hover:border-white'
-                      }`}
+                    <Link
+                      to={`/record/${item.id}`}
+                      onClick={() => haptic.light()}
+                      className="px-3.5 py-1.5 font-mono text-xs rounded-xl transition border bg-[#1a1a1a] hover:bg-[#8b5cf6] text-[#d4d4d4] hover:text-white border-[#2c2c2c] hover:border-[#8b5cf6]"
                     >
-                      {inCart ? 'В корзине' : 'В корзину'}
-                    </button>
+                      Подробнее
+                    </Link>
                   </div>
                 </article>
               );

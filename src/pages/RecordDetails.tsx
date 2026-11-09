@@ -2,22 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Disc3,
-  ShoppingBag,
-  Check,
-  Tag,
-  Layers,
-  Globe,
-  Calendar,
+  MapPin,
   ExternalLink,
   Sparkles,
-  Info,
-  MapPin,
-  Phone,
   Maximize2,
   X,
   ChevronLeft,
   ChevronRight,
-  Music,
   ListMusic,
   FileText,
   Barcode,
@@ -25,9 +16,9 @@ import {
 } from 'lucide-react';
 import { supabase, ITEM_WITH_GRAPH_SELECT, ITEM_CATALOG_SELECT } from '../lib/supabase';
 import { VinylItem, mapSupabaseItem, TrackItem } from '../types/database';
-import { useCart } from '../context/CartContext';
 import { haptic } from '../lib/telegram';
 import { DISCOGS_TOKEN } from '../lib/discogs';
+import { resolveArtistCountry } from '../lib/artistCountry';
 
 interface DiscogsApiResponse {
   id: number;
@@ -62,7 +53,6 @@ interface DiscogsApiResponse {
 export const RecordDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { addToCart, isInCart } = useCart();
 
   const [item, setItem] = useState<VinylItem | null>(null);
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
@@ -112,7 +102,7 @@ export const RecordDetails: React.FC = () => {
           enrichWithLiveDiscogs(currentItem, discogsId, isCancelled);
         }
 
-        // 3. Быстрая асинхронная подгрузка рекомендаций (легковесный ITEM_CATALOG_SELECT с лимитом 6)
+        // 3. Быстрая асинхронная подгрузка рекомендаций
         loadRecommendations(currentItem);
       } catch (e) {
         console.error('Error loading record:', e);
@@ -132,7 +122,7 @@ export const RecordDetails: React.FC = () => {
       const { data: similarData } = await supabase
         .from('items')
         .select(ITEM_CATALOG_SELECT)
-        .in('status', ['active', 'draft'])
+        .eq('status', 'active')
         .neq('id', currentItem.id)
         .limit(10);
 
@@ -245,7 +235,7 @@ export const RecordDetails: React.FC = () => {
         };
       });
 
-      // Сохраняем в Supabase в фоне, чтобы данные были закэшированы для всех пользователей
+      // Сохраняем в Supabase в фоне
       supabase
         .from('releases')
         .update({
@@ -305,9 +295,11 @@ export const RecordDetails: React.FC = () => {
   }
 
   const allPhotos = item.photos.length > 0 ? item.photos : [];
-  const inCart = isInCart(item.id);
   const tracklist = item.release.tracklist || [];
   const discogsCode = item.release.discogs_release_id;
+  const artistsNames = (item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители';
+  const artistCountry = resolveArtistCountry(artistsNames, item.release.discogs_notes);
+  const releaseCountry = item.release.country || 'Импорт';
 
   return (
     <div className="pb-28 space-y-6 max-w-4xl mx-auto">
@@ -494,7 +486,7 @@ export const RecordDetails: React.FC = () => {
             <div className="flex items-center justify-between border-b border-[#171717] pb-1.5">
               <span className="text-[#737373]">Исполнитель:</span>
               <span className="text-white font-semibold">
-                {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'}
+                {artistsNames}
               </span>
             </div>
 
@@ -520,9 +512,16 @@ export const RecordDetails: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between border-b border-[#171717] pb-1.5">
-              <span className="text-[#737373]">Страна:</span>
+              <span className="text-[#737373]">Страна производства:</span>
               <span className="text-white font-bold">
-                {item.release.country || 'Импорт'}
+                {releaseCountry}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between border-b border-[#171717] pb-1.5">
+              <span className="text-[#737373]">Страна авторов / исполнителя:</span>
+              <span className="text-[#c084fc] font-bold">
+                {artistCountry}
               </span>
             </div>
 
@@ -639,25 +638,16 @@ export const RecordDetails: React.FC = () => {
           </div>
         )}
 
-        {/* Контакты магазина в Санкт-Петербурге */}
-        <div className="bg-[#0c0c0c] border border-[#1f1f1f] rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-white">
-              <MapPin className="w-4 h-4 text-[#8b5cf6] shrink-0" />
-              <span className="font-semibold">Санкт-Петербург · магазин ул. Рубинштейна</span>
-            </div>
-            <p className="text-[#737373]">Самовывоз и курьерская отправка в бронекоробе</p>
+        {/* Локация магазина в Санкт-Петербурге */}
+        <div className="bg-[#0c0c0c] border border-[#1f1f1f] rounded-2xl p-4 flex items-center gap-3 text-xs font-mono">
+          <MapPin className="w-4 h-4 text-[#8b5cf6] shrink-0" />
+          <div className="space-y-0.5">
+            <span className="font-semibold text-white">г. Санкт-Петербург, магазин ул. Рубинштейна</span>
+            <p className="text-[#737373] text-[11px]">Каталог оригинальных виниловых пластинок в наличии</p>
           </div>
-          <a
-            href="tel:+79219675106"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1a1a1a] hover:bg-[#252525] text-white border border-[#2e2e2e] font-bold text-sm transition"
-          >
-            <Phone className="w-4 h-4 text-[#8b5cf6]" />
-            +7 921 967-51-06
-          </a>
         </div>
 
-        {/* Цена и добавление в корзину */}
+        {/* Стоимость пластинки и статус витрины */}
         <div className="pt-4 border-t border-[#222222] flex items-center justify-between gap-4">
           <div>
             <span className="text-[11px] font-mono text-[#888888] block">Стоимость пластинки:</span>
@@ -666,30 +656,10 @@ export const RecordDetails: React.FC = () => {
             </span>
           </div>
 
-          <button
-            onClick={() => {
-              haptic.medium();
-              addToCart(item);
-            }}
-            disabled={inCart}
-            className={`px-6 py-4 rounded-2xl font-bold font-mono text-xs uppercase tracking-wider flex items-center gap-2.5 transition shadow-lg ${
-              inCart
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                : 'bg-white hover:bg-[#8b5cf6] text-black hover:text-white shadow-white/10'
-            }`}
-          >
-            {inCart ? (
-              <>
-                <Check className="w-4 h-4" />
-                <span>В корзине</span>
-              </>
-            ) : (
-              <>
-                <ShoppingBag className="w-4 h-4" />
-                <span>Добавить в корзину</span>
-              </>
-            )}
-          </button>
+          <div className="px-5 py-3 rounded-2xl font-mono text-xs text-[#a3a3a3] bg-[#141414] border border-[#262626] flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span>В наличии в Санкт-Петербурге</span>
+          </div>
         </div>
       </div>
 

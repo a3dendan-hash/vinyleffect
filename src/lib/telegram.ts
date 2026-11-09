@@ -30,9 +30,19 @@ export const getTelegramUser = (): any => {
 
 export const isAdminUser = (): boolean => {
   try {
+    // В обычном браузере админка доступна только если в URL явно передан ключ ?admin=vinilpiter
+    if (typeof window !== 'undefined') {
+      const search = window.location.search || '';
+      const hash = window.location.hash || '';
+      if (search.includes('admin=vinilpiter') || hash.includes('admin=vinilpiter')) {
+        return true;
+      }
+    }
+
     const user = getTelegramUser();
     if (!user) {
-      return true; // Вне Telegram всегда режим администратора для настройки
+      // Для всех браузеров и обычных пользователей — строго false (только витрина-каталог)
+      return false;
     }
 
     const rawAdmins = (import.meta as any).env?.VITE_ADMIN_TELEGRAM_ID || '194615771,8584180753';
@@ -43,7 +53,7 @@ export const isAdminUser = (): boolean => {
 
     return adminIds.includes(String(user.id));
   } catch {
-    return true;
+    return false;
   }
 };
 
