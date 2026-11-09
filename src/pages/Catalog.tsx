@@ -16,7 +16,7 @@ import { VinylItem, mapSupabaseItem } from '../types/database';
 import { haptic } from '../lib/telegram';
 import { resolveArtistCountry } from '../lib/artistCountry';
 
-const CLIENT_BATCH_SIZE = 48;
+const CLIENT_BATCH_SIZE = 72;
 const CACHE_KEY = 'vp_catalog_cache_v6';
 
 export const Catalog: React.FC = () => {
@@ -569,7 +569,7 @@ export const Catalog: React.FC = () => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4 lg:gap-5">
             {displayedSlice.map((item) => {
               const cover = item.photos[0] || item.release.default_cover_url;
               const artistNames = (item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители';

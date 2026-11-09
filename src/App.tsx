@@ -59,7 +59,7 @@ const MainLayout: React.FC = () => {
   }, [isAdmin, location.pathname, navigate]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#f5f5f5] w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 pb-12 font-sans selection:bg-[#8b5cf6] selection:text-white">
+    <div className="min-h-screen bg-[#0a0a0a] text-[#f5f5f5] w-full max-w-[1920px] 2xl:max-w-[2400px] mx-auto px-3 sm:px-6 lg:px-8 2xl:px-12 pt-3 pb-12 font-sans selection:bg-[#8b5cf6] selection:text-white">
       <TelegramBackButtonManager />
 
       {/* Верхний инфобар (Санкт-Петербург · витрина магазина) */}

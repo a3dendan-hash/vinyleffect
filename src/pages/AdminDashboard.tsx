@@ -14,16 +14,117 @@ import {
   ChevronDown,
   Sparkles,
   RotateCcw,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import { supabase, ITEM_CATALOG_SELECT } from '../lib/supabase';
 import { VinylItem, ItemStatus, mapSupabaseItem } from '../types/database';
 import { DiscogsImporter } from '../components/admin/DiscogsImporter';
 import { ItemEditorModal } from '../components/admin/ItemEditorModal';
 import { haptic } from '../lib/telegram';
-import { DISCOGS_GENRES, DISCOGS_STYLES } from '../lib/discogs';
+import { DISCOGS_GENRES, DISCOGS_STYLES, DISCOGS_TOKEN } from '../lib/discogs';
 import { resolveArtistCountry } from '../lib/artistCountry';
 
-const CLIENT_ADMIN_BATCH = 50;
+const CLIENT_ADMIN_BATCH = 80;
+
+// Компонент обложки с мгновенной автоматической подгрузкой из Discogs API
+const DraftCover: React.FC<{
+  item: VinylItem;
+  className?: string;
+}> = ({ item, className = '' }) => {
+  const discogsId = item.release?.discogs_release_id;
+  const initialCover =
+    item.photos?.[0] ||
+    item.release?.default_cover_url ||
+    item.release?.cover_url ||
+    (discogsId ? localStorage.getItem(`vp_cover_${discogsId}`) : null);
+
+  const [coverUrl, setCoverUrl] = useState<string | null>(initialCover);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (coverUrl) return;
+    if (!discogsId) return;
+
+    const cached = localStorage.getItem(`vp_cover_${discogsId}`);
+    if (cached) {
+      setCoverUrl(cached);
+      return;
+    }
+
+    let isCancelled = false;
+    const fetchCover = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`https://api.discogs.com/releases/${discogsId}`, {
+          headers: {
+            Authorization: `Discogs token=${DISCOGS_TOKEN}`,
+            'User-Agent': 'VinylPeterDashboard/1.0 (+https://t.me/vinyleffect)',
+          },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const img = data.images?.[0]?.uri;
+        if (img && !isCancelled) {
+          try {
+            localStorage.setItem(`vp_cover_${discogsId}`, img);
+          } catch {}
+          setCoverUrl(img);
+
+          // Обновляем в Supabase в фоне, чтобы обложка сохранилась навсегда
+          supabase
+            .from('releases')
+            .update({
+              default_cover_url: img,
+              cover_url: img,
+              discogs_photos: (data.images || []).map((x: any) => x.uri).filter(Boolean),
+            })
+            .eq('id', item.release.id)
+            .then(() => {});
+
+          supabase
+            .from('items')
+            .update({ photos: [img] })
+            .eq('id', item.id)
+            .then(() => {});
+        }
+      } catch {
+        // silent fail
+      } finally {
+        if (!isCancelled) setLoading(false);
+      }
+    };
+
+    fetchCover();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [discogsId, item.id, item.release?.id, coverUrl]);
+
+  if (coverUrl) {
+    return (
+      <img
+        src={coverUrl}
+        alt={item.release.title}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
+        className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 ${className}`}
+      />
+    );
+  }
+
+  return (
+    <div className={`w-full h-full flex flex-col items-center justify-center bg-[#0d0d0d] text-zinc-600 ${className}`}>
+      {loading ? (
+        <Loader2 className="w-5 h-5 text-[#8b5cf6] animate-spin" />
+      ) : (
+        <Disc3 className="w-6 h-6 text-zinc-700 animate-pulse" />
+      )}
+    </div>
+  );
+};
 
 export const AdminDashboard: React.FC = () => {
   const [items, setItems] = useState<VinylItem[]>([]);
@@ -32,6 +133,7 @@ export const AdminDashboard: React.FC = () => {
   const [editingItem, setEditingItem] = useState<VinylItem | null>(null);
   const [displayCount, setDisplayCount] = useState(CLIENT_ADMIN_BATCH);
   const [showFilters, setShowFilters] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const [counts, setCounts] = useState<{ draft: number; active: number; sold: number }>({
     draft: 0,
@@ -259,7 +361,7 @@ export const AdminDashboard: React.FC = () => {
   ].filter(Boolean).length;
 
   return (
-    <div className="pb-24 max-w-7xl mx-auto">
+    <div className="pb-24 w-full">
       {/* Модуль загрузки Wantlist CSV из Discogs */}
       <DiscogsImporter
         onImportComplete={() => {
@@ -290,8 +392,8 @@ export const AdminDashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* Поиск и панель «Фильтры» для админки */}
-      <div className="bg-[#111111] border border-[#222222] rounded-2xl p-4 mb-5 space-y-3 font-mono text-xs">
+      {/* Поиск, вид сетки и панель «Фильтры» */}
+      <div className="bg-[#111111] border border-[#222222] rounded-2xl p-4 mb-5 space-y-3 font-mono text-xs shadow-md">
         <div className="flex flex-col md:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-[#666666] absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -312,7 +414,39 @@ export const AdminDashboard: React.FC = () => {
             )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {/* Переключатель режима отображения: Сетка (больше всего) vs Список */}
+            <div className="flex items-center bg-[#171717] p-1 rounded-xl border border-[#2a2a2a]">
+              <button
+                onClick={() => {
+                  haptic.light();
+                  setViewMode('grid');
+                }}
+                className={`p-1.5 rounded-lg transition ${
+                  viewMode === 'grid'
+                    ? 'bg-[#8b5cf6] text-white shadow'
+                    : 'text-[#888888] hover:text-white'
+                }`}
+                title="Сетка (для полноэкранного режима)"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  haptic.light();
+                  setViewMode('list');
+                }}
+                className={`p-1.5 rounded-lg transition ${
+                  viewMode === 'list'
+                    ? 'bg-[#8b5cf6] text-white shadow'
+                    : 'text-[#888888] hover:text-white'
+                }`}
+                title="Список"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
@@ -451,7 +585,7 @@ export const AdminDashboard: React.FC = () => {
                   className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
                 >
                   <option value="all">Все цены</option>
-                  <option value="with_price">С ценой (&gt;0 ₽)</option>
+                  <option value="with_price">С указанной ценой (&gt;0 ₽)</option>
                   <option value="no_price">Без цены (0 ₽)</option>
                 </select>
               </div>
@@ -483,13 +617,13 @@ export const AdminDashboard: React.FC = () => {
 
         <div className="text-[11px] text-[#737373] flex items-center justify-between">
           <span>
-            Показано {displayedSlice.length} из {filtered.length} (всего в этой вкладке: {items.length})
+            Показано <strong className="text-white">{displayedSlice.length}</strong> из {filtered.length} (всего в этой вкладке: {items.length})
           </span>
-          <span className="text-[#8b5cf6]">Кликните на любую карточку для открытия редактора</span>
+          <span className="text-[#8b5cf6]">Кликните на карточку для открытия полного редактора</span>
         </div>
       </div>
 
-      {/* Список пластинок текущей вкладки (КЛИКАБЕЛЬНЫЕ КАРТОЧКИ В ЧЕРНОВИКАХ) */}
+      {/* Список / Сетка пластинок текущей вкладки (с адаптацией под полный экран) */}
       {loading ? (
         <div className="py-24 text-center space-y-3">
           <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin mx-auto" />
@@ -505,10 +639,157 @@ export const AdminDashboard: React.FC = () => {
               : 'Перенесите пластинки из черновиков на витрину.'}
           </p>
         </div>
+      ) : viewMode === 'grid' ? (
+        /* РЕЖИМ СЕТКИ: МАКСИМАЛЬНОЕ КОЛИЧЕСТВО НА ПОЛНОМ ЭКРАНЕ (2-8 колонок) */
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8 gap-3 sm:gap-4">
+            {displayedSlice.map((item) => {
+              const artistNames = (item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители';
+              const artistCountry = resolveArtistCountry(artistNames, item.release.discogs_notes);
+              const releaseCountry = item.release.country || 'Импорт';
+
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => {
+                    haptic.light();
+                    setEditingItem(item);
+                  }}
+                  className="bg-[#111111] border border-[#222222] hover:border-[#8b5cf6] rounded-2xl overflow-hidden flex flex-col justify-between transition-all shadow-md cursor-pointer group hover:bg-[#151515]"
+                >
+                  <div>
+                    {/* Обложка с мгновенной авто-подгрузкой */}
+                    <div className="relative aspect-square w-full bg-black border-b border-[#222222] overflow-hidden">
+                      <DraftCover item={item} />
+
+                      {/* Бейджи состояния и типа издания */}
+                      <div className="absolute top-2 left-2 flex flex-col gap-1">
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 bg-black/85 backdrop-blur-sm border border-[#333333] text-white rounded">
+                          {item.condition_media || 'NM-'} • {item.release_type || 'Оригинал'}
+                        </span>
+                      </div>
+
+                      {item.important_details?.includes('Цветной') && (
+                        <div className="absolute top-2 right-2">
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 bg-purple-950/90 text-purple-200 border border-purple-700 rounded flex items-center gap-1">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            Цветной
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Метаданные релиза */}
+                    <div className="p-3 space-y-1 font-mono">
+                      <div className="flex items-center justify-between text-[10px] text-[#737373]">
+                        <span className="truncate max-w-[100px]">{item.release.label || 'Лейбл'}</span>
+                        <span>{item.release.year || ''}</span>
+                      </div>
+
+                      <h4 className="text-xs font-bold text-white uppercase truncate group-hover:text-[#8b5cf6] transition">
+                        {artistNames}
+                      </h4>
+                      <p className="text-[11px] text-[#aaaaaa] truncate">{item.release.title}</p>
+
+                      {/* Страны: Производство и Авторы */}
+                      <div className="pt-1.5 space-y-0.5 text-[10px] border-t border-[#1c1c1c]">
+                        <div className="flex items-center justify-between text-[#737373]">
+                          <span>Сделано:</span>
+                          <span className="text-white font-medium truncate max-w-[95px]">{releaseCountry}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[#737373]">
+                          <span>Авторы:</span>
+                          <span className="text-[#c084fc] font-medium truncate max-w-[95px]">{artistCountry}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Нижний бар: цена и действия */}
+                  <div
+                    className="p-3 pt-2 border-t border-[#1a1a1a] flex items-center justify-between gap-1.5 font-mono"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div>
+                      <span className="text-[9px] text-[#737373] block">Цена:</span>
+                      <span className="text-xs font-bold text-white">
+                        {item.price > 0 ? `${item.price.toLocaleString('ru-RU')} ₽` : '0 ₽'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {statusFilter === 'draft' && (
+                        <button
+                          onClick={() => {
+                            const p = prompt('Укажите цену для публикации на витрину (₽):', String(item.price || 4900));
+                            if (p !== null) {
+                              const num = parseInt(p, 10);
+                              if (!isNaN(num)) {
+                                handlePublishWithPrice(item, num);
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 bg-white hover:bg-[#8b5cf6] text-black hover:text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 shadow"
+                          title="Опубликовать в каталог"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>В каталог</span>
+                        </button>
+                      )}
+
+                      {statusFilter === 'active' && (
+                        <button
+                          onClick={() => handleQuickStatusChange(item.id, 'draft')}
+                          className="px-2 py-1 bg-[#1a1a1a] hover:bg-[#252525] text-[#888888] hover:text-white border border-[#2a2a2a] rounded-lg text-[10px] transition"
+                          title="В черновики"
+                        >
+                          В черновики
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setEditingItem(item)}
+                        className="p-1.5 bg-[#171717] hover:bg-[#252525] text-white border border-[#2a2a2a] rounded-lg transition"
+                        title="Редактировать карточку"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                      </button>
+
+                      <button
+                        onClick={(e) => handleDeleteItem(item.id, e)}
+                        className="p-1.5 bg-[#171717] hover:bg-red-950 text-[#666666] hover:text-red-400 border border-[#2a2a2a] rounded-lg transition"
+                        title="Удалить"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {displayedSlice.length < filtered.length && (
+            <div className="pt-4 text-center">
+              <button
+                onClick={loadMoreAdminSlice}
+                className="px-8 py-3.5 bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] rounded-2xl font-mono text-xs text-[#a3a3a3] hover:text-white transition inline-flex items-center gap-2 shadow-lg"
+              >
+                <ChevronDown className="w-4 h-4 text-[#8b5cf6]" />
+                <span>
+                  Показать еще {Math.min(CLIENT_ADMIN_BATCH, filtered.length - displayedSlice.length)} (показано {displayedSlice.length} из {filtered.length})
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
       ) : (
+        /* РЕЖИМ СПИСКА (ПОСТРОЧНО) */
         <div className="space-y-3">
           {displayedSlice.map((item) => {
-            const cover = item.photos[0] || item.release.default_cover_url;
+            const artistNames = (item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители';
+            const artistCountry = resolveArtistCountry(artistNames, item.release.discogs_notes);
+            const releaseCountry = item.release.country || 'Импорт';
 
             return (
               <div
@@ -522,22 +803,13 @@ export const AdminDashboard: React.FC = () => {
                 {/* Превью и метаданные */}
                 <div className="flex items-center gap-3.5 min-w-0 flex-1">
                   <div className="w-16 h-16 rounded-xl bg-black border border-[#262626] overflow-hidden shrink-0 flex items-center justify-center">
-                    {cover ? (
-                      <img
-                        src={cover}
-                        alt=""
-                        loading="lazy"
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                      />
-                    ) : (
-                      <Disc3 className="w-8 h-8 text-[#444444]" />
-                    )}
+                    <DraftCover item={item} />
                   </div>
 
                   <div className="min-w-0 space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-[#8b5cf6] font-mono truncate">
-                        {(item.release?.artists || []).map((a) => a.name).join(', ') || 'Разные исполнители'}
+                        {artistNames}
                       </span>
                       {item.release.year && (
                         <span className="text-[10px] font-mono text-[#888888]">({item.release.year})</span>
@@ -572,12 +844,12 @@ export const AdminDashboard: React.FC = () => {
                       {item.release.country && (
                         <>
                           <span>•</span>
-                          <span>Сделано: {item.release.country}</span>
+                          <span>Сделано: {releaseCountry}</span>
                         </>
                       )}
                       <span>•</span>
                       <span className="text-[#c084fc]">
-                        Авторы: {resolveArtistCountry((item.release?.artists || []).map((a) => a.name).join(', '), item.release.discogs_notes)}
+                        Авторы: {artistCountry}
                       </span>
                     </div>
 
@@ -673,7 +945,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="pt-4 text-center">
               <button
                 onClick={loadMoreAdminSlice}
-                className="px-6 py-3 bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] rounded-xl font-mono text-xs text-[#a3a3a3] hover:text-white transition inline-flex items-center gap-2"
+                className="px-8 py-3.5 bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] rounded-2xl font-mono text-xs text-[#a3a3a3] hover:text-white transition inline-flex items-center gap-2 shadow-lg"
               >
                 <ChevronDown className="w-4 h-4 text-[#8b5cf6]" />
                 <span>
