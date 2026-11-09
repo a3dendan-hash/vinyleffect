@@ -5,6 +5,7 @@ import {
   Disc3,
   Loader2,
   Search,
+  SlidersHorizontal,
   X,
   ExternalLink,
   Send,
@@ -12,12 +13,14 @@ import {
   Trash2,
   ChevronDown,
   Sparkles,
+  RotateCcw,
 } from 'lucide-react';
 import { supabase, ITEM_CATALOG_SELECT } from '../lib/supabase';
 import { VinylItem, ItemStatus, mapSupabaseItem } from '../types/database';
 import { DiscogsImporter } from '../components/admin/DiscogsImporter';
 import { ItemEditorModal } from '../components/admin/ItemEditorModal';
 import { haptic } from '../lib/telegram';
+import { DISCOGS_GENRES, DISCOGS_STYLES } from '../lib/discogs';
 
 const CLIENT_ADMIN_BATCH = 50;
 
@@ -27,6 +30,7 @@ export const AdminDashboard: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<ItemStatus>('draft');
   const [editingItem, setEditingItem] = useState<VinylItem | null>(null);
   const [displayCount, setDisplayCount] = useState(CLIENT_ADMIN_BATCH);
+  const [showFilters, setShowFilters] = useState(false);
 
   const [counts, setCounts] = useState<{ draft: number; active: number; sold: number }>({
     draft: 0,
@@ -34,10 +38,19 @@ export const AdminDashboard: React.FC = () => {
     sold: 0,
   });
 
-  // Состояния фильтров для админки
+  // Состояния фильтрации админки (все вынесены во вкладку «Фильтры»)
   const [query, setQuery] = useState('');
-  const [conditionFilter, setConditionFilter] = useState('');
-  const [priceFilter, setPriceFilter] = useState<'all' | 'with_price' | 'no_price'>('all');
+  const [selectedGenre, setSelectedGenre] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState('');
+  const [selectedLabel, setSelectedLabel] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState('');
+  const [selectedCondition, setSelectedCondition] = useState('');
+  const [selectedReleaseType, setSelectedReleaseType] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [yearFrom, setYearFrom] = useState('');
+  const [yearTo, setYearTo] = useState('');
+  const [priceTypeFilter, setPriceTypeFilter] = useState<'all' | 'with_price' | 'no_price'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc' | 'title_asc'>('newest');
 
   const fetchCounts = async () => {
@@ -57,8 +70,6 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // Загружаем сразу ВСЕ пластинки выбранного статуса (параллельные запросы по 1000)
-  // Это избавляет от постраничной загрузки по 24 штуки и дает мгновенный поиск по всем черновикам
   const fetchAllAdminItems = async () => {
     setLoading(true);
     try {
@@ -127,6 +138,27 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Списки для выпадающих фильтров Discogs
+  const allGenres = useMemo(() => {
+    const fromItems = items.flatMap((i) => i.release.genre);
+    return Array.from(new Set([...fromItems, ...DISCOGS_GENRES])).filter(Boolean).sort();
+  }, [items]);
+
+  const allStyles = useMemo(() => {
+    const fromItems = items.flatMap((i) => i.release.style);
+    return Array.from(new Set([...fromItems, ...DISCOGS_STYLES])).filter(Boolean).sort();
+  }, [items]);
+
+  const allLabels = useMemo(() => {
+    return Array.from(new Set(items.map((i) => i.release.label))).filter(Boolean).sort() as string[];
+  }, [items]);
+
+  const allCountries = useMemo(() => {
+    const standard = ['Russia', 'USSR', 'Germany', 'UK', 'US', 'Japan', 'France', 'Italy', 'Netherlands', 'Canada'];
+    const fromItems = items.map((i) => i.release.country).filter(Boolean) as string[];
+    return Array.from(new Set([...fromItems, ...standard])).sort();
+  }, [items]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
@@ -143,9 +175,21 @@ export const AdminDashboard: React.FC = () => {
         }
       }
 
-      if (conditionFilter && item.condition_media !== conditionFilter) return false;
-      if (priceFilter === 'with_price' && item.price <= 0) return false;
-      if (priceFilter === 'no_price' && item.price > 0) return false;
+      if (selectedGenre && !item.release.genre.includes(selectedGenre)) return false;
+      if (selectedStyle && !item.release.style.includes(selectedStyle)) return false;
+      if (selectedLabel && item.release.label !== selectedLabel) return false;
+      if (selectedCountry && item.release.country !== selectedCountry) return false;
+      if (selectedCondition && item.condition_media !== selectedCondition) return false;
+      if (selectedReleaseType && item.release_type !== selectedReleaseType) return false;
+
+      if (minPrice && item.price < Number(minPrice)) return false;
+      if (maxPrice && item.price > Number(maxPrice)) return false;
+
+      if (yearFrom && (item.release.year || 0) < Number(yearFrom)) return false;
+      if (yearTo && (item.release.year || 0) > Number(yearTo)) return false;
+
+      if (priceTypeFilter === 'with_price' && item.price <= 0) return false;
+      if (priceTypeFilter === 'no_price' && item.price > 0) return false;
 
       return true;
     });
@@ -156,9 +200,23 @@ export const AdminDashboard: React.FC = () => {
       if (sortBy === 'title_asc') return (a.release?.title || '').localeCompare(b.release?.title || '');
       return 0;
     });
-  }, [items, query, conditionFilter, priceFilter, sortBy]);
+  }, [
+    items,
+    query,
+    selectedGenre,
+    selectedStyle,
+    selectedLabel,
+    selectedCountry,
+    selectedCondition,
+    selectedReleaseType,
+    minPrice,
+    maxPrice,
+    yearFrom,
+    yearTo,
+    priceTypeFilter,
+    sortBy,
+  ]);
 
-  // Срез для мгновенного плавного рендера DOM
   const displayedSlice = useMemo(() => {
     return filtered.slice(0, displayCount);
   }, [filtered, displayCount]);
@@ -167,6 +225,37 @@ export const AdminDashboard: React.FC = () => {
     haptic.light();
     setDisplayCount((prev) => Math.min(prev + CLIENT_ADMIN_BATCH, filtered.length));
   };
+
+  const resetAllFilters = () => {
+    haptic.light();
+    setQuery('');
+    setSelectedGenre('');
+    setSelectedStyle('');
+    setSelectedLabel('');
+    setSelectedCountry('');
+    setSelectedCondition('');
+    setSelectedReleaseType('');
+    setMinPrice('');
+    setMaxPrice('');
+    setYearFrom('');
+    setYearTo('');
+    setPriceTypeFilter('all');
+    setSortBy('newest');
+  };
+
+  const activeFiltersCount = [
+    selectedGenre,
+    selectedStyle,
+    selectedLabel,
+    selectedCountry,
+    selectedCondition,
+    selectedReleaseType,
+    minPrice,
+    maxPrice,
+    yearFrom,
+    yearTo,
+    priceTypeFilter !== 'all' ? priceTypeFilter : '',
+  ].filter(Boolean).length;
 
   return (
     <div className="pb-24 max-w-7xl mx-auto">
@@ -200,7 +289,7 @@ export const AdminDashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* Поиск и фильтры админки */}
+      {/* Поиск и панель «Фильтры» для админки */}
       <div className="bg-[#111111] border border-[#222222] rounded-2xl p-4 mb-5 space-y-3 font-mono text-xs">
         <div className="flex flex-col md:flex-row gap-3">
           <div className="relative flex-1">
@@ -222,42 +311,174 @@ export const AdminDashboard: React.FC = () => {
             )}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <select
-              value={conditionFilter}
-              onChange={(e) => setConditionFilter(e.target.value)}
-              className="bg-[#171717] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#8b5cf6]"
-            >
-              <option value="">Любое состояние</option>
-              {['M', 'NM', 'NM-', 'EX', 'VG+', 'VG', 'G+', 'G'].map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={priceFilter}
-              onChange={(e) => setPriceFilter(e.target.value as any)}
-              className="bg-[#171717] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#8b5cf6]"
-            >
-              <option value="all">Все цены</option>
-              <option value="with_price">С ценой (&gt;0 ₽)</option>
-              <option value="no_price">Без цены (0 ₽)</option>
-            </select>
-
+          <div className="flex gap-2">
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="col-span-2 sm:col-span-1 bg-[#171717] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#8b5cf6]"
+              className="bg-[#171717] border border-[#2a2a2a] rounded-xl px-3 py-2 text-white focus:outline-none focus:border-[#8b5cf6]"
             >
               <option value="newest">Сначала новые</option>
               <option value="price_asc">Цена: по возрастанию</option>
               <option value="price_desc">Цена: по убыванию</option>
               <option value="title_asc">По названию (А-Я)</option>
             </select>
+
+            <button
+              onClick={() => {
+                haptic.light();
+                setShowFilters((prev) => !prev);
+              }}
+              className={`px-4 py-2 rounded-xl border flex items-center gap-1.5 transition ${
+                showFilters || activeFiltersCount > 0
+                  ? 'bg-[#8b5cf6] text-white border-[#8b5cf6]'
+                  : 'bg-[#171717] text-[#a3a3a3] border-[#2a2a2a] hover:text-white'
+              }`}
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              <span>Фильтры</span>
+              {activeFiltersCount > 0 && (
+                <span className="w-4 h-4 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Раскрывающаяся панель фильтров админки */}
+        {showFilters && (
+          <div className="bg-[#141414] border border-[#282828] rounded-2xl p-4 mt-3 space-y-3 pt-3">
+            <div className="flex items-center justify-between border-b border-[#222222] pb-2">
+              <span className="font-bold text-white uppercase text-[11px]">Фильтры раздела ({statusFilter})</span>
+              {activeFiltersCount > 0 && (
+                <button
+                  onClick={resetAllFilters}
+                  className="text-xs text-[#888888] hover:text-white flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Сбросить всё ({activeFiltersCount})</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[#888888] mb-1">Жанр (Discogs)</label>
+                <select
+                  value={selectedGenre}
+                  onChange={(e) => setSelectedGenre(e.target.value)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                >
+                  <option value="">Все жанры</option>
+                  {allGenres.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Стиль (Discogs)</label>
+                <select
+                  value={selectedStyle}
+                  onChange={(e) => setSelectedStyle(e.target.value)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                >
+                  <option value="">Все стили</option>
+                  {allStyles.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Лейбл</label>
+                <select
+                  value={selectedLabel}
+                  onChange={(e) => setSelectedLabel(e.target.value)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                >
+                  <option value="">Все лейблы</option>
+                  {allLabels.map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Страна</label>
+                <select
+                  value={selectedCountry}
+                  onChange={(e) => setSelectedCountry(e.target.value)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                >
+                  <option value="">Все страны</option>
+                  {allCountries.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Состояние (Goldmine)</label>
+                <select
+                  value={selectedCondition}
+                  onChange={(e) => setSelectedCondition(e.target.value)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                >
+                  <option value="">Любое состояние</option>
+                  {['M', 'NM', 'NM-', 'EX', 'VG+', 'VG', 'G+', 'G'].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Тип цены</label>
+                <select
+                  value={priceTypeFilter}
+                  onChange={(e) => setPriceTypeFilter(e.target.value as any)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                >
+                  <option value="all">Все цены</option>
+                  <option value="with_price">С ценой (&gt;0 ₽)</option>
+                  <option value="no_price">Без цены (0 ₽)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Цена от (₽)</label>
+                <input
+                  type="number"
+                  value={minPrice}
+                  onChange={(e) => setMinPrice(e.target.value)}
+                  placeholder="От ₽"
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[#888888] mb-1">Цена до (₽)</label>
+                <input
+                  type="number"
+                  value={maxPrice}
+                  onChange={(e) => setMaxPrice(e.target.value)}
+                  placeholder="До ₽"
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-xl px-2.5 py-1.5 text-white"
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="text-[11px] text-[#737373] flex items-center justify-between">
           <span>
@@ -393,7 +614,6 @@ export const AdminDashboard: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {/* Кнопка публикации из черновика */}
                     {statusFilter === 'draft' && (
                       <button
                         onClick={() => {
@@ -444,7 +664,6 @@ export const AdminDashboard: React.FC = () => {
             );
           })}
 
-          {/* Кнопка подгрузки следующей порции из памяти */}
           {displayedSlice.length < filtered.length && (
             <div className="pt-4 text-center">
               <button

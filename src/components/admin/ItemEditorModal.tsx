@@ -3,6 +3,7 @@ import { X, Camera, Trash2, Sparkles, Loader2, Check, Globe, Upload, Image as Im
 import { supabase } from '../../lib/supabase';
 import { VinylItem, MediaCondition, SleeveCondition, ItemStatus } from '../../types/database';
 import { haptic } from '../../lib/telegram';
+import { DISCOGS_TOKEN } from '../../lib/discogs';
 
 const MEDIA_GRADES: MediaCondition[] = ['M', 'NM', 'NM-', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P'];
 const SLEEVE_GRADES: SleeveCondition[] = ['M', 'NM', 'NM-', 'EX', 'VG+', 'VG', 'G+', 'G', 'F', 'P', 'Generic'];
@@ -87,7 +88,10 @@ export const ItemEditorModal: React.FC<Props> = ({ item, onClose, onSaved }) => 
     setFetchingDiscogs(true);
     try {
       const res = await fetch(`https://api.discogs.com/releases/${discogsId}`, {
-        headers: { 'User-Agent': 'VinylPeterMarketplace/1.0' },
+        headers: {
+          'Authorization': `Discogs token=${DISCOGS_TOKEN}`,
+          'User-Agent': 'VinylPeterMarketplace/1.0 (+https://t.me/vinyleffect)',
+        },
       });
       if (!res.ok) throw new Error('Не удалось получить данные от Discogs API');
       const data = await res.json();

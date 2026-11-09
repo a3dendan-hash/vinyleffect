@@ -334,7 +334,7 @@ const MainLayout: React.FC = () => {
             </a>
           </div>
           <div className="space-y-1.5">
-            <span className="text-white font-bold block">Стандарт Goldmine</span>
+            <span className="text-white font-bold block">Магазин виниловых пластинок</span>
             <p className="text-[11px]">
               M (Mint) / NM (Near Mint) / EX (Excellent) / VG+ / VG
             </p>

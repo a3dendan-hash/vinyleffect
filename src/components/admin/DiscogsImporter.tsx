@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import { Upload, CheckCircle2, AlertCircle, Loader2, FileSpreadsheet, Key, ExternalLink, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { haptic } from '../../lib/telegram';
+import { DISCOGS_TOKEN } from '../../lib/discogs';
 
 interface DiscogsRow {
   release_id?: string;
@@ -63,7 +64,7 @@ export const DiscogsImporter: React.FC<Props> = ({ onImportComplete }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, currentTitle: '' });
   const [resultMsg, setResultMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [discogsToken, setDiscogsToken] = useState<string>(() => localStorage.getItem('discogs_token') || '');
+  const [discogsToken, setDiscogsToken] = useState<string>(() => localStorage.getItem('discogs_token') || DISCOGS_TOKEN);
   const [fetchFromApi, setFetchFromApi] = useState<boolean>(true);
 
   const cleanArtist = (raw: string) => raw.replace(/\s+\(\d+\)$/, '').trim();

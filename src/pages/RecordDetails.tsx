@@ -27,6 +27,7 @@ import { supabase, ITEM_WITH_GRAPH_SELECT, ITEM_CATALOG_SELECT } from '../lib/su
 import { VinylItem, mapSupabaseItem, TrackItem } from '../types/database';
 import { useCart } from '../context/CartContext';
 import { haptic } from '../lib/telegram';
+import { DISCOGS_TOKEN } from '../lib/discogs';
 
 interface DiscogsApiResponse {
   id: number;
@@ -157,6 +158,7 @@ export const RecordDetails: React.FC = () => {
       setEnriching(true);
       const res = await fetch(`https://api.discogs.com/releases/${discogsId}`, {
         headers: {
+          'Authorization': `Discogs token=${DISCOGS_TOKEN}`,
           'User-Agent': 'VinylPeterMarketplace/1.0 (+https://t.me/vinyleffect)',
         },
       });
